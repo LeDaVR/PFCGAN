@@ -1,6 +1,3 @@
-import sys
-import os
-import dlib
 import cv2
 import numpy as np
 import glob
@@ -8,6 +5,8 @@ from tqdm import tqdm
 
 import argparse
 import os
+
+import dlib
 
 def crop(img):
     height, _ = img.shape[:2]
@@ -31,10 +30,12 @@ parser.add_argument('--progress_file', type=str, help="Archivo que contiene el n
 # Parsear los argumentos
 args = parser.parse_args()
 
+print("starting")
 # Lógica para el modo 'clean'
 if args.mode == 'clean':
     print("Modo limpio seleccionado. Limpiando...")
     # Aquí va el código para el modo 'clean'
+
 
 # Lógica para el modo 'continue', donde los argumentos `--folder` y `--model` son requeridos
 elif args.mode == 'continue':
