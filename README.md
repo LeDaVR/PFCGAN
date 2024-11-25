@@ -1,5 +1,9 @@
 # PFCGAN
 
+##
+WORK IN PROGRESS
+##
+
 ## Preprocessing
 
 execute `python preprocess.py` to preprocess the dataset.
