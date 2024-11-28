@@ -27,6 +27,17 @@ feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/test/processed'
 train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
 print(train_dataset)
 
+# Hyperparameters
+LANDMARK_RECONSTRUCTION = 2000
+FACE_MASK_RECONSTRUCTION = 4000
+FACE_PART_RECONSTRUCTION = 4000
+DOMAIN_KL = 30
+GLOBAL_DISCRIMINATOR_LOSS = 30
+CONSISTENCY_LOSS = 1
+EXTRACTOR_RECONSTRUCTION = 28
+EXTRACTOR_KL = 30
+
+
 # # Visualizar
 # plt.figure(figsize=(8,6))
 # plt.imshow(create_inpainting_mask(), cmap='gray')
@@ -104,12 +115,14 @@ def log_normal_pdf(sample, mean, logvar, raxis=1):
 
 def l1_loss(y_true, y_pred):
   r_loss = tf.reduce_mean(tf.abs(y_true - y_pred), axis = [1,2,3])
-  return 1000 * tf.reduce_mean(r_loss)
+  return tf.reduce_mean(r_loss)
 
 def l1_loss_dim1(y_true, y_pred):
   r_loss = tf.reduce_mean(tf.abs(y_true - y_pred), axis = [1])
-  return 1000 * tf.reduce_mean(r_loss)
+  return tf.reduce_mean(r_loss)
 
+def cross_entropy_loss(y_true, y_pred):
+  return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y_true, logits=y_pred))
 
 def sampling(z_mean, z_log_sigma):
   eps = tf.random.normal(shape = tf.shape(input=z_mean))
@@ -194,8 +207,6 @@ def train_step(batch):
       face_mask_reconstructed = face_mask_decoder(z_emb, training=True)
       face_part_reconstructed = face_part_decoder(z_emb, training=True)
 
-      tf.print("z_emb shape", z_emb.shape)
-
       # Generator
       generated_images = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
       generated_images = ( generated_images * batch_mask) + batch_original * (1. - batch_mask)
@@ -217,25 +228,19 @@ def train_step(batch):
       f_face_part = face_part_decoder(z_emb, training=True)
 
       generated_fake_images = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
-      tf.print('f_landmarks', tf.shape(f_landmarks))
-      tf.print('f_face_mask', tf.shape(f_face_mask))
-      tf.print('f_face_part', tf.shape(f_face_part))
-      tf.print('generated_fake_images', tf.shape(generated_fake_images))
 
       fft = tf.concat([generated_fake_images, f_landmarks, f_face_mask, f_face_part], axis=-1)
 
       ef_mu, ef_log_var = extractor(fft, training=True)
       z_fake_sample = sampling(ef_mu, ef_log_var)
 
-      tf.print('z_fake_sample', tf.shape(z_fake_sample))
-
-      consistency_loss = l1_loss_dim1(z_fake_sample, z)
-      disc_loss = discriminator_loss(real_output, fake_output)
-      ext_loss = extractor_loss(batch_original, generated_images, e_mu, e_log_var)
-      landmark_loss = vae_loss(batch_landmarks, landmark_reconstructed, zl_mu, zl_log_var)
-      face_mask_loss = vae_loss(batch_face_mask, face_mask_reconstructed, zf_mu, zf_log_var)
-      face_part_loss = vae_loss(batch_face_part, face_part_reconstructed, zf_mu, zf_log_var)
-      gen_loss = generator_loss(fake_output) 
+      consistency_loss = CONSISTENCY_LOSS * l1_loss_dim1(z_fake_sample, z)
+      disc_loss = GLOBAL_DISCRIMINATOR_LOSS * discriminator_loss(real_output, fake_output)
+      ext_loss =  EXTRACTOR_RECONSTRUCTION * l1_loss(batch_original, generated_images) + EXTRACTOR_KL * kl_loss(e_mu, e_log_var)
+      landmark_loss = LANDMARK_RECONSTRUCTION * l1_loss(batch_landmarks, landmark_reconstructed) + DOMAIN_KL * kl_loss(zl_mu, zl_log_var)
+      face_mask_loss = FACE_MASK_RECONSTRUCTION * l1_loss(batch_face_mask, face_mask_reconstructed) + DOMAIN_KL * kl_loss(zf_mu, zf_log_var)
+      face_part_loss = FACE_PART_RECONSTRUCTION * l1_loss(batch_face_part, face_part_reconstructed) 
+      gen_loss = GLOBAL_DISCRIMINATOR_LOSS * generator_loss(fake_output) 
 
       total_loss = (
         gen_loss + ext_loss + landmark_loss + face_mask_loss + face_part_loss + consistency_loss
