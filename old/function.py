@@ -3,7 +3,6 @@ import logging
 import cv2
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.framework.python.ops import add_arg_scope
 
 # pip install git+https://github.com/JiahuiYu/neuralgym
 from neuralgym.ops.layers import resize
@@ -15,7 +14,6 @@ logger = logging.getLogger()
 np.random.seed(2019)
 
 
-@add_arg_scope
 def gen_conv(x, cnum, ksize, stride = 1, rate = 1, name = 'conv',
              padding = 'SAME', activation = tf.nn.elu, training = True):
     """Define conv for generator.
@@ -45,12 +43,10 @@ def gen_conv(x, cnum, ksize, stride = 1, rate = 1, name = 'conv',
         activation = activation, padding = padding, name = name)
     return x
 
-@add_arg_scope
 def _residual_block(x, cnum,filter_size=3, training = True):
     tmp = _conv_layer(x, cnum, filter_size, 2)
     return x + _conv_layer(tmp, cnum, filter_size, 2, relu=True)
 
-@add_arg_scope
 def _conv_layer(x, num_filters, filter_size, strides, relu=True):
     weights_init = _conv_init_vars(x, num_filters, filter_size)
     strides_shape = [1, strides, strides, 1]
@@ -82,7 +78,6 @@ def _conv_init_vars(net, out_channels, filter_size, transpose=False):
     return weights_init
 
 
-@add_arg_scope
 def gen_conv_add_z(x, z, cnum, ksize, stride = 1, rate = 1, name = 'conv',
              padding = 'SAME', activation = tf.nn.elu, training = True):
     """Define conv for generator.
@@ -115,7 +110,6 @@ def gen_conv_add_z(x, z, cnum, ksize, stride = 1, rate = 1, name = 'conv',
     return x
 
 
-@add_arg_scope
 def gen_deconv(x, cnum, name = 'upsample', padding = 'SAME', training = True):
     """Define deconv for generator.
     The deconv is defined to be a x2 resize_nearest_neighbor operation with
@@ -139,7 +133,6 @@ def gen_deconv(x, cnum, name = 'upsample', padding = 'SAME', training = True):
     return x
 
 
-@add_arg_scope
 def dis_conv(x, cnum, ksize = 5, stride = 2, name = 'conv', training = True):
     """Define conv for discriminator.
     Activation is set to leaky_relu.
@@ -160,7 +153,6 @@ def dis_conv(x, cnum, ksize = 5, stride = 2, name = 'conv', training = True):
     x = tf.nn.leaky_relu(x)
     return x
 
-@add_arg_scope
 def e_conv(x, cnum, ksize = 5, stride = 2, name = 'conv', training = True):
     """Define conv for discriminator.
     Activation is set to leaky_relu.
