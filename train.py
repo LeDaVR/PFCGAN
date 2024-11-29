@@ -18,8 +18,8 @@ from utils import generate_and_save_images, mask_rgb
 
 tf.config.run_functions_eagerly(True)
 
+batch_size = 13
 ### Load and prepare the dataset
-batch_size = 8
 original_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/test/original'
 feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/test/processed'
 train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
@@ -154,15 +154,22 @@ checkpoint_dir = './training_checkpoints'
 checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(generator_optimizer=generator_optimizer,
                                  discriminator_optimizer=discriminator_optimizer,
+                                 domain_optimizer=domain_optimizer,
                                  generator=generator,
-                                 discriminator=discriminator)
+                                 discriminator=discriminator,
+                                 landmark_encoder=landmark_encoder,
+                                 landmark_decoder=landmark_decoder,
+                                 face_encoder=face_encoder,
+                                 face_mask_decoder=face_mask_decoder,
+                                 face_part_decoder=face_part_decoder,
+                                 )
 
 ## Define the training loop
 
 
 EPOCHS = 50
 noise_dim = 512
-num_examples_to_generate = 8
+num_examples_to_generate = batch_size
 
 # You will reuse this seed overtime (so it's easier)
 # to visualize progress in the animated GIF)
