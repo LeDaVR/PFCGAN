@@ -2,8 +2,6 @@
 import tensorflow as tf
 from tensorflow.keras import layers
 
-import glob
-import imageio
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -321,15 +319,3 @@ def display_image(epoch_no):
   return PIL.Image.open('res/image_at_epoch_{:04d}.png'.format(EPOCHS))
 
 display_image(15)
-
-anim_file = 'dcgan.gif'
-
-with imageio.get_writer(anim_file, mode='I') as writer:
-  filenames = glob.glob('/res/image*.png')
-  filenames = sorted(filenames)
-  for filename in filenames:
-    image = imageio.imread(filename)
-    writer.append_data(image)
-
-import tensorflow_docs.vis.embed as embed
-embed.embed_file(anim_file)
