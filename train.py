@@ -28,9 +28,9 @@ train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_si
 print(train_dataset)
 
 # Hyperparameters
-LANDMARK_RECONSTRUCTION = 2000
-FACE_MASK_RECONSTRUCTION = 4000
-FACE_PART_RECONSTRUCTION = 4000
+LANDMARK_RECONSTRUCTION = 1000
+FACE_MASK_RECONSTRUCTION = 2000
+FACE_PART_RECONSTRUCTION = 2000
 DOMAIN_KL = 30
 GLOBAL_DISCRIMINATOR_LOSS = 30
 CONSISTENCY_LOSS = 1
@@ -148,6 +148,7 @@ def vae_loss(y_true, y_pred, mean, log_var):
 
 generator_optimizer = tf.keras.optimizers.Adam(1e-4)
 discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
+domain_optimizer = tf.keras.optimizers.Adam(1e-4)
  
 ### Save checkpoints
 
@@ -177,7 +178,7 @@ seed = [z_seed, sample, mask_batch]
 # This annotation causes the function to be "compiled".
 @tf.function
 def train_step(batch):
-    with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
+    with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape, tf.GradientTape() as domain_tape:
 
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
@@ -240,30 +241,35 @@ def train_step(batch):
       landmark_loss = LANDMARK_RECONSTRUCTION * l1_loss(batch_landmarks, landmark_reconstructed) + DOMAIN_KL * kl_loss(zl_mu, zl_log_var)
       face_mask_loss = FACE_MASK_RECONSTRUCTION * l1_loss(batch_face_mask, face_mask_reconstructed) + DOMAIN_KL * kl_loss(zf_mu, zf_log_var)
       face_part_loss = FACE_PART_RECONSTRUCTION * l1_loss(batch_face_part, face_part_reconstructed) 
-      gen_loss = GLOBAL_DISCRIMINATOR_LOSS * generator_loss(fake_output) 
+      gen_loss = generator_loss(fake_output) 
 
       total_loss = (
-        gen_loss + ext_loss + landmark_loss + face_mask_loss + face_part_loss + consistency_loss
+        gen_loss + ext_loss + consistency_loss
       )
+
+      total_domain_loss = landmark_loss + face_mask_loss + face_part_loss
 
     generator_trainable_variables = (
       generator.trainable_variables +
-      extractor.trainable_variables +
+      extractor.trainable_variables 
+    )
+
+    domain_trainable_variables = (
       landmark_encoder.trainable_variables + 
       landmark_decoder.trainable_variables + 
       face_encoder.trainable_variables + 
       face_mask_decoder.trainable_variables + 
       face_part_decoder.trainable_variables
     )
-
-
     # print("losses", total_loss, ext_loss, gen_loss)
     
     gradients_of_generator = gen_tape.gradient(total_loss, generator_trainable_variables)
     gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
+    gradients_of_domain = domain_tape.gradient(total_domain_loss, domain_trainable_variables)
 
     generator_optimizer.apply_gradients(zip(gradients_of_generator, generator_trainable_variables))
     discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
+    domain_optimizer.apply_gradients(zip(gradients_of_domain, domain_trainable_variables))
 
     return {
       "total_loss": total_loss,
@@ -273,7 +279,8 @@ def train_step(batch):
       "landmark_loss": landmark_loss,
       "face_mask_loss": face_mask_loss,
       "face_part_loss": face_part_loss,
-      "consistency_loss": consistency_loss
+      "consistency_loss": consistency_loss,
+      "total_domain_loss": total_domain_loss,
     }
 
 def train(dataset, epochs):
