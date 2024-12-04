@@ -110,20 +110,20 @@ def make_landmark_encoder():
 
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(incomplete)
-    x = layers.Concatenate(axis=-1)([x, z1])
+    # x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z2])
+    # x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z3])
+    # x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z4])
+    # x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z5])
+    # x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
 
     out_dim = 256
-    z_mean = layers.Dense(out_dim, activation='softplus')(x)
-    z_log_var = layers.Dense(out_dim, activation='softplus')(x)
+    z_mean = layers.Dense(out_dim)(x)
+    z_log_var = layers.Dense(out_dim)(x)
 
     model = tf.keras.Model(inputs=[incomplete, z], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
@@ -144,7 +144,7 @@ def make_landmark_decoder():
     x = layers.Conv2DTranspose(filters * 4, (4,4), (2,2), name = 'deconv2', activation='relu', padding='same')(x)
     x = layers.Conv2DTranspose(filters * 2, (4,4), (2,2), name = 'deconv3', activation='relu', padding='same')(x)
     x = layers.Conv2DTranspose(filters, (4,4), (2,2), name = 'deconv4', activation='relu', padding='same')(x)
-    x = layers.Conv2D(1, (3,3), (1,1), activation=tf.nn.tanh, name='conv1', padding='same')(x)
+    x = layers.Conv2D(1, (3,3), (1,1), name='conv1', padding='same')(x)
     model = tf.keras.Model(inputs=[z], outputs=x, name="landmark_decoder")
 
     return model
@@ -179,8 +179,25 @@ def make_face_mask_decoder():
     x = layers.Conv2DTranspose(filters * 4, (4,4), (2,2), name = 'deconv2', activation='relu', padding='same')(x)
     x = layers.Conv2DTranspose(filters * 2, (4,4), (2,2), name = 'deconv3', activation='relu', padding='same')(x)
     x = layers.Conv2DTranspose(filters, (4,4), (2,2), name = 'deconv4', activation='relu', padding='same')(x)
-    x = layers.Conv2D(1, (3,3), (1,1), activation=tf.nn.tanh, name='conv1', padding='same')(x)
+    x = layers.Conv2D(1, (3,3), (1,1), name='conv1', padding='same')(x)
 
     model = tf.keras.Model(inputs=[z], outputs=x, name="face_part_decoder")
+
+    return model
+
+def make_local_discriminator():
+    input_image = layers.Input(shape=(128, 128, 3))
+    mask = layers.Input(shape=(128, 128, 1))
+    features =  32
+    x = layers.concatenate([input_image, mask], axis=-1)
+    x = layers.Conv2D(features, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
+    x = layers.Conv2D(features * 2, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
+    x = layers.Conv2D(features * 4, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
+    x = layers.Conv2D(features * 8, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
+    x = layers.Conv2D(features * 8, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(1)(x)
+
+    model = tf.keras.Model(inputs=[input_image, mask], outputs=x, name="local_discriminator")
 
     return model
