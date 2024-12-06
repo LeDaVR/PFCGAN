@@ -254,7 +254,7 @@ def train_step(batch):
       # tf.print("Mask shape before processing:", tf.shape(batch_mask))
 
       # Landkard encoder
-      zl_mu, zl_log_var  = landmark_encoder([batch_original_incomplete, extractor_sample], training=True)
+      zl_mu, zl_log_var  = landmark_encoder([batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1]], training=True)
       landmark_sample = sampling(zl_mu, zl_log_var)
       landmark_reconstructed = landmark_decoder(landmark_sample, training=True)
       # tf.print("Landmark shape:", tf.shape(landmark_reconstructed))
@@ -323,10 +323,16 @@ def train_step(batch):
       # Landmark loss
       y_true_landmarks = (batch_landmarks + 1.) / 2.
       # tf.print("landmark loss", temp_loss)
-      landmark_loss = reconstruction_loss(landmark_reconstructed, y_true_landmarks )
+      landmark_loss = 0.001 *reconstruction_loss(landmark_reconstructed, y_true_landmarks )
       landmark_kl_loss = kl_divergence_loss(landmark_sample,zl_mu, zl_log_var)
+
+      zero_mask = tf.zeros_like(mask_batch)
+      zl_mu_c, zl_log_var_c  = landmark_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
+      landmark_sample_c = sampling(zl_mu_c, zl_log_var_c)
+
+      landmark_consistency_loss = l1_loss_dim1(landmark_sample, landmark_sample_c)
       # test_sample , test = compute_loss(landmark_vae, batch_original, y_true_landmarks)
-      total_landmark_loss = tf.reduce_mean(landmark_loss + landmark_kl_loss)
+      total_landmark_loss = tf.reduce_mean(landmark_loss + landmark_kl_loss) + landmark_consistency_loss
       # tf.print("test", test)
       # sum_loss = tf.reduce_sum(temp_loss, axis=[1,2,3])
       # landmark_loss = tf.reduce_mean(sum_loss)
@@ -391,6 +397,7 @@ def train_step(batch):
         "face_part_reconstruction_loss": tf.reduce_mean(face_part_loss),
         "landkmark_kl_loss": tf.reduce_mean(landmark_kl_loss),
         "face_mask_kl_loss": tf.reduce_mean(face_mask_kl_loss),
+        "landmark_consistency_loss": (landmark_consistency_loss),
         # "consistency_loss": consistency_loss,
       }
     }
