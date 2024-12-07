@@ -126,6 +126,7 @@ def make_face_encoder():
 
     #Inputs
     incomplete = layers.Input(shape=(128,128,3))
+    mask = layers.Input(shape=(128,128,1))
     z = layers.Input(shape=(z_dim,))
 
 
@@ -136,8 +137,10 @@ def make_face_encoder():
     z4 = layers.Reshape((8, 8, -1))(z3)
     z5 = layers.Reshape((4, 4, -1))(z4)
 
+    # concatenate incomplete and mask
+    x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
-    x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(incomplete)
+    x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z2])
@@ -153,7 +156,7 @@ def make_face_encoder():
     z_mean = layers.Dense(out_dim)(x)
     z_log_var = layers.Dense(out_dim)(x)
 
-    model = tf.keras.Model(inputs=[incomplete, z], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
     return model
 
@@ -205,7 +208,7 @@ def make_face_mask_decoder():
     x = layers.Conv2DTranspose(filters, (4,4), (2,2), name = 'deconv4', activation='relu', padding='same')(x)
     x = layers.Conv2D(1, (3,3), (1,1), name='conv1', padding='same')(x)
 
-    model = tf.keras.Model(inputs=[z], outputs=x, name="face_part_decoder")
+    model = tf.keras.Model(inputs=[z], outputs=x, name="face_mask_decoder")
 
     return model
 

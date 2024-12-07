@@ -260,7 +260,7 @@ def train_step(batch):
       # tf.print("Landmark shape:", tf.shape(landmark_reconstructed))
 
       # Face encoder
-      zf_mu, zf_log_var  = face_encoder([batch_original_incomplete, extractor_sample], training=True)
+      zf_mu, zf_log_var  = face_encoder([batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1]], training=True)
       face_sample = sampling(zf_mu, zf_log_var)
 
       z_emb = tf.concat([landmark_sample, face_sample], axis=-1)
@@ -320,29 +320,35 @@ def train_step(batch):
       gen_reconstruction_loss = l1_reconstruction_loss(y_false, y_true)
       total_loss = gen_loss + 0.1 * tf.reduce_mean(gen_reconstruction_loss) + local_gen_loss # + tf.reduce_mean(extractor_reconstruction_loss + extractor_kl_loss)  # + consistency_loss  
 
-      # Landmark loss
+      # Landmark loss -----------------------------------------------------------------------------------------------------
       y_true_landmarks = (batch_landmarks + 1.) / 2.
       # tf.print("landmark loss", temp_loss)
-      landmark_loss = 0.001 *reconstruction_loss(landmark_reconstructed, y_true_landmarks )
+      landmark_loss = reconstruction_loss(landmark_reconstructed , y_true_landmarks )
       landmark_kl_loss = kl_divergence_loss(landmark_sample,zl_mu, zl_log_var)
 
       zero_mask = tf.zeros_like(mask_batch)
       zl_mu_c, zl_log_var_c  = landmark_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
       landmark_sample_c = sampling(zl_mu_c, zl_log_var_c)
 
-      landmark_consistency_loss = l1_loss_dim1(landmark_sample, landmark_sample_c)
-      # test_sample , test = compute_loss(landmark_vae, batch_original, y_true_landmarks)
+      landmark_consistency_loss = 20 * l1_loss_dim1(landmark_sample, landmark_sample_c)
       total_landmark_loss = tf.reduce_mean(landmark_loss + landmark_kl_loss) + landmark_consistency_loss
-      # tf.print("test", test)
-      # sum_loss = tf.reduce_sum(temp_loss, axis=[1,2,3])
-      # landmark_loss = tf.reduce_mean(sum_loss)
+
+      # Face loss --------------------------------------------------------------------------------------------------------
       y_true_mask = (batch_face_mask + 1.) / 2.
-      face_mask_loss = reconstruction_loss(face_mask_reconstructed, y_true_mask, tf.constant(4.))  
+      face_mask_loss = reconstruction_loss(face_mask_reconstructed, y_true_mask, tf.constant(3.5))  
       face_mask_kl_loss = kl_divergence_loss(face_sample, zf_mu, zf_log_var)
       y_true_part = (batch_face_part + 1.) / 2.
       reconstructed_part = (face_part_reconstructed + 1.) / 2.
       face_part_loss = l1_reconstruction_loss(reconstructed_part, y_true_part) 
-      total_face_loss = tf.reduce_mean(face_mask_loss + face_part_loss + face_mask_kl_loss)
+
+      zf_mu_c, zf_log_var_c  = face_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
+      face_sample_c = sampling(zf_mu_c, zf_log_var_c)
+
+      face_consistency_loss = l1_loss_dim1(face_sample, face_sample_c)
+
+      total_face_loss = tf.reduce_mean(face_mask_loss +  face_part_loss + 20 * face_mask_kl_loss) + face_consistency_loss
+
+      # C
 
     generator_trainable_variables = (
       generator.trainable_variables 
@@ -375,8 +381,6 @@ def train_step(batch):
     gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
     local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
 
-    # gradients_of_landmark_vae = landmark_vae_tape.gradient(test, landmark_vae.trainable_variables)
-    # landmark_vae_optimizer.apply_gradients(zip(gradients_of_landmark_vae, landmark_vae.trainable_variables))
     return {
       "outputs": {
         "original_images": batch_original,
@@ -398,6 +402,7 @@ def train_step(batch):
         "landkmark_kl_loss": tf.reduce_mean(landmark_kl_loss),
         "face_mask_kl_loss": tf.reduce_mean(face_mask_kl_loss),
         "landmark_consistency_loss": (landmark_consistency_loss),
+        "face_consistency_loss": (face_consistency_loss),
         # "consistency_loss": consistency_loss,
       }
     }
@@ -409,6 +414,7 @@ def train(dataset, epochs):
     for step, image_batch in enumerate(dataset):
       values = train_step(image_batch)
 
+    tf.print("losses", values["losses"])	
     # Registrar métricas en TensorBoard
     with writer.as_default():
       for name, value in values["losses"].items():
@@ -422,26 +428,26 @@ def train(dataset, epochs):
                           epoch = epoch + 1,
                           args = seed)
 
-    # if (epoch + 1) % 4 == 0:
-    #   outputs = values["outputs"]
-    #   original_image = outputs["original_images"][0]
-    #   landmark_sample = outputs["landmark_reconstructed"][0]
-    #   mask_sample = outputs["face_mask_reconstructed"][0]
-    #   face_part_samle = outputs["face_part_reconstructed"][0]
-    #   fig = plt.figure(figsize=(6, 6))
-    #   plt.subplot(1, 4, 1)
-    #   plt.imshow(tf.sigmoid(landmark_sample) , cmap='gray')
-    #   plt.axis('off')
-    #   plt.subplot(1, 4, 2)
-    #   plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
-    #   plt.axis('off')
-    #   plt.subplot(1, 4, 3)
-    #   plt.imshow((face_part_samle + 1.) / 2.)
-    #   plt.axis('off')
-    #   plt.subplot(1, 4, 4)
-    #   plt.imshow((original_image + 1.) / 2.)
-    #   plt.axis('off')
-    #   plt.show()
+    if (epoch + 1) % 4 == 0:
+      outputs = values["outputs"]
+      original_image = outputs["original_images"][0]
+      landmark_sample = outputs["landmark_reconstructed"][0]
+      mask_sample = outputs["face_mask_reconstructed"][0]
+      face_part_samle = outputs["face_part_reconstructed"][0]
+      fig = plt.figure(figsize=(6, 6))
+      plt.subplot(1, 4, 1)
+      plt.imshow(tf.sigmoid(landmark_sample) , cmap='gray')
+      plt.axis('off')
+      plt.subplot(1, 4, 2)
+      plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
+      plt.axis('off')
+      plt.subplot(1, 4, 3)
+      plt.imshow((face_part_samle + 1.) / 2.)
+      plt.axis('off')
+      plt.subplot(1, 4, 4)
+      plt.imshow((original_image + 1.) / 2.)
+      plt.axis('off')
+      plt.show()
 
     # Save the model every 15 epochs
     if (epoch + 1) % 15 == 0:
