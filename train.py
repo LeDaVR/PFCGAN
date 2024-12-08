@@ -242,7 +242,7 @@ mask_batch = mask_rgb(num_examples_to_generate)
 z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
 for item in train_dataset.take(1):
   sample = item[:,:,:,0:3] * (1. - mask_batch)
-seed = [z_seed, sample, mask_batch]
+seed = [z_seed, sample, mask_batch[:,:,:,0:1]]
 log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 writer = tf.summary.create_file_writer(log_dir)
 
@@ -270,7 +270,7 @@ def train_step(batch):
       z_random = tf.random.normal(shape = [batch_size, noise_dim])
 
       _, zf_emb, zf_landmarks, zf_mask, zf_part = feature_embedding(batch_original_incomplete, z_random, batch_mask[:,:,:,0:1])
-      icf = generator([zf_emb, batch_original_incomplete, batch_mask], training=True)
+      icf = generator([zf_emb, batch_original_incomplete, batch_mask[:,:,:,0:1]], training=True)
 
       z_generated_mu, z_generated_log_var = extractor(tf.concat([icf, zf_landmarks, zf_mask, zf_part], axis=-1), training=True)
       generated_sample = sampling(z_generated_mu, z_generated_log_var)
@@ -301,12 +301,12 @@ def train_step(batch):
       zr_mask = face_mask_decoder(z_emb, training=True)
       zr_part = face_part_decoder(z_emb, training=True)
 
-      icr = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
+      icr = generator([z_emb, batch_original_incomplete, batch_mask[:,:,:,0:1]], training=True)
 
       landmark_reconstruction_loss = reconstruction_loss(zr_landmarks, (batch_landmarks + 1.) / 2., tf.constant(7.))
-      face_mask_reconstruction_loss = reconstruction_loss(zr_mask, (batch_face_mask + 1.) / 2., tf.constant(3.5))
+      face_mask_reconstruction_loss = 0.5 * reconstruction_loss(zr_mask, (batch_face_mask + 1.) / 2., tf.constant(3.5))
       face_part_reconstruction_loss = l1_reconstruction_loss(zr_part, batch_face_part)
-      embedding_reconstruction_loss = landmark_reconstruction_loss + face_mask_reconstruction_loss + face_part_reconstruction_loss
+      embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
 
       # Embedding consistency loss
       _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(batch_original, extractor_sample, tf.zeros_like(mask_batch[:,:,:,0:1]))
@@ -608,7 +608,7 @@ def train(dataset, epochs):
                           epoch = epoch + 1,
                           args = seed)
 
-    if (epoch + 1) % 4 == 0:
+    if (epoch + 1) % 4 == 0 and False:
       outputs = values["outputs"]
       original_image = outputs["original_images"][0]
       landmark_sample = outputs["landmark_reconstructed"][0]
