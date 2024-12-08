@@ -143,7 +143,7 @@ def vae_loss(y_true, y_pred, mean, log_var):
 
 def l1_reconstruction_loss(x, y_true):
   l1 = tf.reduce_sum(tf.abs(y_true - x), axis = [1,2,3])
-  return l1
+  return tf.reduce_mean(l1)
 
 def reconstruction_loss(x_logit, y_true, weight=tf.constant(7.)):
     cross_ent = tf.nn.weighted_cross_entropy_with_logits(
@@ -151,12 +151,11 @@ def reconstruction_loss(x_logit, y_true, weight=tf.constant(7.)):
         labels=y_true, 
         pos_weight=weight
     )
-    return tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+    imgs_loss = tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+    return tf.reduce_mean(imgs_loss)
 
 def kl_divergence_loss(z, mean, logvar):
-    logpz = log_normal_pdf(z, 0., 0.)
-    logqz_x = log_normal_pdf(z, mean, logvar)
-    return -(logpz - logqz_x)
+    return 0.5 * tf.reduce_sum(tf.exp(logvar) + tf.square(mean) - 1. - logvar)
 
 # def compute_loss(model, x, y_true):
 #     mean, logvar = model.encode(x)
@@ -169,10 +168,10 @@ def kl_divergence_loss(z, mean, logvar):
 #     return x_logit, -tf.reduce_mean(recon_loss + kl_loss)
 
 generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+global_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 local_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-landmark_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-face_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+face_embedding_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+extractor_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 
  
 ### Save checkpoints
@@ -180,10 +179,11 @@ face_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 checkpoint_dir = './training_checkpoints'
 checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(generator_optimizer=generator_optimizer,
-                                 discriminator_optimizer=discriminator_optimizer,
-                                 face_optimizer=face_optimizer,
-                                 landmark_optimizer=landmark_optimizer,
+                                 extractor_optimizer=extractor_optimizer,
+                                 global_discriminator_optimizer=global_discriminator_optimizer,
+                                 face_embedding_optimizer=face_embedding_optimizer,
                                  local_discriminator_optimizer=local_discriminator_optimizer,
+                                 extractor=extractor,
                                  generator=generator,
                                  discriminator=discriminator,
                                  local_discriminator=local_discriminator,
@@ -214,6 +214,21 @@ def compute_loss(model, x, y_true):
 
   return x_logit , tf.reduce_mean( logpx_z - logpz + logqz_x)
 
+def feature_embedding(x, z_extractor, mask):
+  # Landkard encoder
+  zl_mu, zl_log_var  = landmark_encoder([x, z_extractor, mask], training=True)
+  landmark_sample = sampling(zl_mu, zl_log_var)
+  landmark_reconstructed = landmark_decoder(landmark_sample, training=True)
+  # Mask encoder
+  zf_mu, zf_log_var  = face_encoder([x, z_extractor, mask], training=True)
+  face_sample = sampling(zf_mu, zf_log_var)
+  z_emb = tf.concat([landmark_sample, face_sample], axis=-1)
+  # Face mask decoder
+  face_mask_reconstructed = face_mask_decoder(z_emb, training=True)
+  face_part_reconstructed = face_part_decoder(z_emb, training=True)
+
+  return (landmark_sample, face_sample), z_emb, landmark_reconstructed, face_mask_reconstructed, face_part_reconstructed
+
 
 EPOCHS = 50
 noise_dim = 512
@@ -235,9 +250,11 @@ writer = tf.summary.create_file_writer(log_dir)
 # This annotation causes the function to be "compiled".
 @tf.function
 def train_step(batch):
-    with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape, \
-      tf.GradientTape() as landmark_tape, tf.GradientTape() as face_tape, \
-      tf.GradientTape() as local_discriminator_tape:
+    with tf.GradientTape() as gen_tape, \
+      tf.GradientTape() as global_disc_tape, \
+      tf.GradientTape() as embedding_tape, \
+      tf.GradientTape() as local_discriminator_tape, \
+      tf.GradientTape() as extractor_tape:
 
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
@@ -249,161 +266,324 @@ def train_step(batch):
       batch_face_part = batch[:,:,:,5:8]
 
       # Extractor 
+
+      z_random = tf.random.normal(shape = [batch_size, noise_dim])
+
+      _, zf_emb, zf_landmarks, zf_mask, zf_part = feature_embedding(batch_original_incomplete, z_random, batch_mask[:,:,:,0:1])
+      icf = generator([zf_emb, batch_original_incomplete, batch_mask], training=True)
+
+      z_generated_mu, z_generated_log_var = extractor(tf.concat([icf, zf_landmarks, zf_mask, zf_part], axis=-1), training=True)
+      generated_sample = sampling(z_generated_mu, z_generated_log_var)
+
+      #Extractor loss
+      extractor_kl_loss = kl_divergence_loss(generated_sample, z_generated_mu, z_generated_log_var)
+      extractor_consistency_loss = l1_loss_dim1(generated_sample, z_random)
+
+      total_extractor_loss = extractor_kl_loss + extractor_consistency_loss
+
+      # Face Embedding
+
       e_mu, e_log_var = extractor(batch, training=True)
       extractor_sample = sampling(e_mu, e_log_var)
-      # tf.print("Mask shape before processing:", tf.shape(batch_mask))
 
+      # (z1,z2), zr_emb, zr_landmarks, zr_mask, zr_part = feature_embedding(batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1])
+
+      one_channel_mask = mask_batch[:,:,:,0:1]
       # Landkard encoder
-      zl_mu, zl_log_var  = landmark_encoder([batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1]], training=True)
-      landmark_sample = sampling(zl_mu, zl_log_var)
-      landmark_reconstructed = landmark_decoder(landmark_sample, training=True)
-      # tf.print("Landmark shape:", tf.shape(landmark_reconstructed))
+      zlr_mu, zlr_log_var  = landmark_encoder([batch_original_incomplete, extractor_sample, one_channel_mask], training=True)
+      zr_l_sample = sampling(zlr_mu, zlr_log_var)
+      zr_landmarks = landmark_decoder(zr_l_sample, training=True)
+      # Mask encoder
+      zfr_mu, zfr_log_var  = face_encoder([batch_original_incomplete, extractor_sample, one_channel_mask], training=True)
+      zfr_f_sample = sampling(zfr_mu, zfr_log_var)
+      z_emb = tf.concat([zr_l_sample, zfr_f_sample], axis=-1)
+      # Face mask decoder
+      zr_mask = face_mask_decoder(z_emb, training=True)
+      zr_part = face_part_decoder(z_emb, training=True)
 
-      # Face encoder
-      zf_mu, zf_log_var  = face_encoder([batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1]], training=True)
-      face_sample = sampling(zf_mu, zf_log_var)
+      icr = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
 
-      z_emb = tf.concat([landmark_sample, face_sample], axis=-1)
+      landmark_reconstruction_loss = reconstruction_loss(zr_landmarks, (batch_landmarks + 1.) / 2., tf.constant(7.))
+      face_mask_reconstruction_loss = reconstruction_loss(zr_mask, (batch_face_mask + 1.) / 2., tf.constant(3.5))
+      face_part_reconstruction_loss = l1_reconstruction_loss(zr_part, batch_face_part)
+      embedding_reconstruction_loss = landmark_reconstruction_loss + face_mask_reconstruction_loss + face_part_reconstruction_loss
 
-      face_mask_reconstructed = face_mask_decoder(z_emb, training=True)
-      face_part_reconstructed = face_part_decoder(z_emb, training=True)
+      # Embedding consistency loss
+      _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(batch_original, extractor_sample, tf.zeros_like(mask_batch[:,:,:,0:1]))
+      consistency_embedding_loss = l1_loss_dim1(z_emb, zemb_no_mask)
+      
+      # Embedding kl loss
+      z1_kl_loss = kl_divergence_loss(zr_l_sample, zlr_mu, zlr_log_var)
+      z2_kl_loss = kl_divergence_loss(zfr_f_sample, zfr_mu, zfr_log_var)
 
-      # Generator
-      generated_images = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
-      generated_images = ( generated_images * batch_mask) + batch_original * (1. - batch_mask)
+      total_embedding_loss = embedding_reconstruction_loss + consistency_embedding_loss + z1_kl_loss + z2_kl_loss
 
-      # Discriminator
+      # Generator loss
+
+      gan_reconstruction_loss = tf.reduce_mean(l1_reconstruction_loss(icr, batch_original))
+
+      # Consistency Loss
+      _, _, icr_landmarks, icr_mask, icr_part = feature_embedding(icr, extractor_sample, tf.zeros_like(mask_batch[:,:,:,0:1]))
+      icr_landmark_loss = 0.2 * l1_reconstruction_loss(zr_landmarks,(icr_landmarks))
+      icr_face_mask_loss = 0.2 * l1_reconstruction_loss(zr_mask, (icr_mask))
+      icr_face_part_loss = l1_reconstruction_loss(zr_part, part_no_mask)
+
+      icr_consistency_loss = icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss
+
+
+      # Discriminator loss
+
       real_output = discriminator(batch_original, training=True)  
-      fake_output = discriminator(generated_images, training=True)
+      fake_output = discriminator(icr, training=True)
 
-      # Local discriminator
+      # Local discriminator loss
       masked_batch_original = batch_original * (batch_mask)
-      masked_generated_images = generated_images * (batch_mask)
+      masked_generated_images = icr * (batch_mask)
 
       local_real_output = local_discriminator([masked_batch_original, batch_mask[:,:,:,0:1]], training=True)  
       local_fake_output = local_discriminator([masked_generated_images, batch_mask[:,:,:,0:1]], training=True)
 
-      # Consitency loss for the generator
+      global_discriminator_loss = discriminator_loss(real_output, fake_output)
+      local_discriminator_loss = discriminator_loss(local_real_output, local_fake_output)
+
+      local_generator_loss = generator_loss(local_fake_output)
+      global_generator_loss = generator_loss(fake_output)
+
+      total_generator_loss = gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss
+
+      # # tf.print("Mask shape before processing:", tf.shape(batch_mask))
+
+      # # Landkard encoder
+      # zl_mu, zl_log_var  = landmark_encoder([batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1]], training=True)
+      # landmark_sample = sampling(zl_mu, zl_log_var)
+      # landmark_reconstructed = landmark_decoder(landmark_sample, training=True)
+      # # tf.print("Landmark shape:", tf.shape(landmark_reconstructed))
+
+      # # Face encoder
+      # zf_mu, zf_log_var  = face_encoder([batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1]], training=True)
+      # face_sample = sampling(zf_mu, zf_log_var)
+
+      # z_emb = tf.concat([landmark_sample, face_sample], axis=-1)
+
+      # face_mask_reconstructed = face_mask_decoder(z_emb, training=True)
+      # face_part_reconstructed = face_part_decoder(z_emb, training=True)
+
+      # # Generator
+      # generated_images = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
+      # generated_images = ( generated_images * batch_mask) + batch_original * (1. - batch_mask)
+
+      # # Discriminator
+      # real_output = discriminator(batch_original, training=True)  
+      # fake_output = discriminator(generated_images, training=True)
+
+      # # Local discriminator
+      # masked_batch_original = batch_original * (batch_mask)
+      # masked_generated_images = generated_images * (batch_mask)
+
+      # local_real_output = local_discriminator([masked_batch_original, batch_mask[:,:,:,0:1]], training=True)  
+      # local_fake_output = local_discriminator([masked_generated_images, batch_mask[:,:,:,0:1]], training=True)
+
+      # # Consitency loss for the generator
       # z = tf.random.normal(shape = [batch_size, noise_dim])
-      # zlf_mu, zlf_log_var = landmark_encoder([batch_original_incomplete, z], training=True)
+      # zlf_mu, zlf_log_var = landmark_encoder([batch_original_incomplete, z, batch_mask[:,:,:,0:1]], training=True)
       # zlf_sample = sampling(zlf_mu, zlf_log_var)
       # f_landmarks = landmark_decoder(zlf_sample, training=True)
-      #
-      # zff_mu, zff_log_var = face_encoder([batch_original_incomplete, z], training=True)
+      
+      # zff_mu, zff_log_var = face_encoder([batch_original_incomplete, z, batch_mask[:,:,:,0:1]], training=True)
       # zff_sample = sampling(zff_mu, zff_log_var)
       # z_emb = tf.concat([zlf_sample, zff_sample], axis=-1)
-      #
+      
       # f_face_mask = face_mask_decoder(z_emb, training=True)
       # f_face_part = face_part_decoder(z_emb, training=True)
-      #
+      
       # generated_fake_images = generator([z_emb, batch_original_incomplete, batch_mask], training=True)
-      #
+      
       # fft = tf.concat([generated_fake_images, f_landmarks, f_face_mask, f_face_part], axis=-1)
-      #
+      
       # ef_mu, ef_log_var = extractor(fft, training=True)
       # z_fake_sample = sampling(ef_mu, ef_log_var)
 
-      # Local discriminator loss
-      local_discriminator_loss = discriminator_loss(local_real_output, local_fake_output)
+      # # Local discriminator loss
+      # local_discriminator_loss = discriminator_loss(local_real_output, local_fake_output)
 
-      # Gan loss
-      # consistency_loss = CONSISTENCY_LOSS * l1_loss_dim1(z_fake_sample, z)
-      disc_loss = discriminator_loss(real_output, fake_output)
-      y_true = (batch_original + 1.) / 2.
-      y_false = (generated_images + 1.) / 2.
+      # # Gan loss
+      # # consistency_loss = CONSISTENCY_LOSS * l1_loss_dim1(z_fake_sample, z)
+      # disc_loss = discriminator_loss(real_output, fake_output)
+      # y_true = (batch_original + 1.) / 2.
+      # y_false = (generated_images + 1.) / 2.
 
-      extractor_reconstruction_loss = l1_reconstruction_loss(y_false, y_true)
-      extractor_kl_loss = EXTRACTOR_KL * kl_divergence_loss(extractor_sample, e_mu, e_log_var)
+      # gen_loss = generator_loss(fake_output) 
+      # local_gen_loss = generator_loss(local_fake_output)
+      # gen_reconstruction_loss = l1_reconstruction_loss(y_false, y_true)
+      # total_loss = gen_loss + 0.1 * tf.reduce_mean(gen_reconstruction_loss) + local_gen_loss # + tf.reduce_mean(extractor_reconstruction_loss + extractor_kl_loss)  # + consistency_loss  
 
-      gen_loss = generator_loss(fake_output) 
-      local_gen_loss = generator_loss(local_fake_output)
-      gen_reconstruction_loss = l1_reconstruction_loss(y_false, y_true)
-      total_loss = gen_loss + 0.1 * tf.reduce_mean(gen_reconstruction_loss) + local_gen_loss # + tf.reduce_mean(extractor_reconstruction_loss + extractor_kl_loss)  # + consistency_loss  
+      # # Landmark loss -----------------------------------------------------------------------------------------------------
+      # y_true_landmarks = (batch_landmarks + 1.) / 2.
+      # # tf.print("landmark loss", temp_loss)
+      # landmark_loss = reconstruction_loss(landmark_reconstructed , y_true_landmarks )
+      # landmark_kl_loss = kl_divergence_loss(landmark_sample,zl_mu, zl_log_var)
 
-      # Landmark loss -----------------------------------------------------------------------------------------------------
-      y_true_landmarks = (batch_landmarks + 1.) / 2.
-      # tf.print("landmark loss", temp_loss)
-      landmark_loss = reconstruction_loss(landmark_reconstructed , y_true_landmarks )
-      landmark_kl_loss = kl_divergence_loss(landmark_sample,zl_mu, zl_log_var)
+      # zero_mask = tf.zeros_like(mask_batch)
+      # zl_mu_c, zl_log_var_c  = landmark_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
+      # landmark_sample_c = sampling(zl_mu_c, zl_log_var_c)
 
-      zero_mask = tf.zeros_like(mask_batch)
-      zl_mu_c, zl_log_var_c  = landmark_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
-      landmark_sample_c = sampling(zl_mu_c, zl_log_var_c)
+      # landmark_consistency_loss = 20 * l1_loss_dim1(landmark_sample, landmark_sample_c)
+      # total_landmark_loss = tf.reduce_mean(landmark_loss ) +  landmark_kl_loss + landmark_consistency_loss
 
-      landmark_consistency_loss = 20 * l1_loss_dim1(landmark_sample, landmark_sample_c)
-      total_landmark_loss = tf.reduce_mean(landmark_loss + landmark_kl_loss) + landmark_consistency_loss
+      # # Face loss --------------------------------------------------------------------------------------------------------
+      # y_true_mask = (batch_face_mask + 1.) / 2.
+      # face_mask_loss = reconstruction_loss(face_mask_reconstructed, y_true_mask, tf.constant(3.5))  
+      # face_mask_kl_loss = kl_divergence_loss(face_sample, zf_mu, zf_log_var)
+      # y_true_part = (batch_face_part + 1.) / 2.
+      # reconstructed_part = (face_part_reconstructed + 1.) / 2.
+      # face_part_loss = l1_reconstruction_loss(reconstructed_part, y_true_part) 
 
-      # Face loss --------------------------------------------------------------------------------------------------------
-      y_true_mask = (batch_face_mask + 1.) / 2.
-      face_mask_loss = reconstruction_loss(face_mask_reconstructed, y_true_mask, tf.constant(3.5))  
-      face_mask_kl_loss = kl_divergence_loss(face_sample, zf_mu, zf_log_var)
-      y_true_part = (batch_face_part + 1.) / 2.
-      reconstructed_part = (face_part_reconstructed + 1.) / 2.
-      face_part_loss = l1_reconstruction_loss(reconstructed_part, y_true_part) 
+      # zf_mu_c, zf_log_var_c  = face_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
+      # face_sample_c = sampling(zf_mu_c, zf_log_var_c)
 
-      zf_mu_c, zf_log_var_c  = face_encoder([batch_original, extractor_sample, zero_mask[:,:,:,0:1]], training=True)
-      face_sample_c = sampling(zf_mu_c, zf_log_var_c)
+      # face_consistency_loss = l1_loss_dim1(face_sample, face_sample_c)
 
-      face_consistency_loss = l1_loss_dim1(face_sample, face_sample_c)
-
-      total_face_loss = tf.reduce_mean(face_mask_loss +  face_part_loss + 20 * face_mask_kl_loss) + face_consistency_loss
+      # total_face_loss = tf.reduce_mean(face_mask_loss +  face_part_loss ) + face_mask_kl_loss + face_consistency_loss
 
       # C
 
-    generator_trainable_variables = (
-      generator.trainable_variables 
-      # extractor.trainable_variables
-    )
+    # generator_trainable_variables = (
+    #   generator.trainable_variables 
+    #   # extractor.trainable_variables
+    # )
 
-    face_trainable_variables = (
+    # face_trainable_variables = (
+    #   face_encoder.trainable_variables + 
+    #   face_mask_decoder.trainable_variables + 
+    #   face_part_decoder.trainable_variables
+    # )
+
+    # landmark_trainable_variables = (
+    #   landmark_encoder.trainable_variables + 
+    #   landmark_decoder.trainable_variables 
+    # )
+
+    face_embedding_trainable_variables = (
       face_encoder.trainable_variables + 
+      landmark_encoder.trainable_variables +
       face_mask_decoder.trainable_variables + 
-      face_part_decoder.trainable_variables
+      face_part_decoder.trainable_variables+ 
+      landmark_decoder.trainable_variables
     )
 
-    landmark_trainable_variables = (
-      landmark_encoder.trainable_variables + 
-      landmark_decoder.trainable_variables 
-    )
-    # print("losses", total_loss, ext_loss, gen_loss)
-    gradients_of_landmark = landmark_tape.gradient(total_landmark_loss, landmark_trainable_variables)
-    landmark_optimizer.apply_gradients(zip(gradients_of_landmark, landmark_trainable_variables))
+    gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
+    face_embedding_optimizer.apply_gradients(zip(gradients_of_embedding, face_embedding_trainable_variables))
 
-    gradients_of_face = face_tape.gradient(total_face_loss, face_trainable_variables)
-    face_optimizer.apply_gradients(zip(gradients_of_face, face_trainable_variables))
-    
-    gradients_of_generator = gen_tape.gradient(total_loss, generator_trainable_variables)
-    generator_optimizer.apply_gradients(zip(gradients_of_generator, generator_trainable_variables))
-
-    gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
-    discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
+    gradients_of_global_discriminator = global_disc_tape.gradient(global_discriminator_loss, discriminator.trainable_variables)
+    global_discriminator_optimizer.apply_gradients(zip(gradients_of_global_discriminator, discriminator.trainable_variables))
 
     gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
     local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
 
+    gradients_of_generator = gen_tape.gradient(total_generator_loss, generator.trainable_variables)
+    generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
+
+    gradients_of_extractor = extractor_tape.gradient(total_extractor_loss, extractor.trainable_variables)
+    extractor_optimizer.apply_gradients(zip(gradients_of_extractor, extractor.trainable_variables))
+
+
+    # gradients_of_landmark = landmark_tape.gradient(total_landmark_loss, landmark_trainable_variables)
+    # landmark_optimizer.apply_gradients(zip(gradients_of_landmark, landmark_trainable_variables))
+
+    # gradients_of_face = face_tape.gradient(total_face_loss, face_trainable_variables)
+    # face_optimizer.apply_gradients(zip(gradients_of_face, face_trainable_variables))
+    
+    # gradients_of_generator = gen_tape.gradient(total_loss, generator_trainable_variables)
+    # generator_optimizer.apply_gradients(zip(gradients_of_generator, generator_trainable_variables))
+
+    # gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
+    # discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, discriminator.trainable_variables))
+
+    # gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
+    # local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
+
+    # with tf.GradientTape() as extractor_tape:
+    #   # Prepare the batch
+    #   batch_size = tf.shape(batch)[0]
+    #   batch_mask = mask_rgb(batch_size)
+    #   batch_original = batch[:,:,:,0:3]
+    #   batch_original_incomplete = batch_original * (1. - batch_mask)
+    #   batch_landmarks = batch[:,:,:,3:4]
+    #   batch_face_mask = batch[:,:,:,4:5]
+    #   batch_face_part = batch[:,:,:,5:8]
+
+    #   # Extractor 
+    #   e_mu, e_log_var = extractor(batch, training=True)
+    #   extractor_sample = sampling(e_mu, e_log_var)
+
+    #   # Random sample
+    #   z = tf.random.normal(shape = [batch_size, noise_dim])
+    #   zlf_mu, zlf_log_var = landmark_encoder([batch_original_incomplete, z, batch_mask[:,:,:,0:1]], training=False)
+    #   zlf_sample = sampling(zlf_mu, zlf_log_var)
+    #   f_landmarks = landmark_decoder(zlf_sample, training=False)
+      
+    #   zff_mu, zff_log_var = face_encoder([batch_original_incomplete, z, batch_mask[:,:,:,0:1]], training=False)
+    #   zff_sample = sampling(zff_mu, zff_log_var)
+    #   z_emb = tf.concat([zlf_sample, zff_sample], axis=-1)
+      
+    #   f_face_mask = face_mask_decoder(z_emb, training=False)
+    #   f_face_part = face_part_decoder(z_emb, training=False)
+      
+    #   generated_fake_images = generator([z_emb, batch_original_incomplete, batch_mask], training=False)
+      
+    #   fft = tf.concat([generated_fake_images, f_landmarks, f_face_mask, f_face_part], axis=-1)
+      
+    #   ef_mu, ef_log_var = extractor(fft, training=False)
+    #   z_fake_sample = sampling(ef_mu, ef_log_var)
+
+    #   extractor_kl_loss = EXTRACTOR_KL * kl_divergence_loss(extractor_sample, e_mu, e_log_var)
+    #   extractor_l1_loss = l1_loss_dim1(z_fake_sample, z)
+
+    #   total_extractor_loss = (extractor_kl_loss) + extractor_l1_loss
+    
+    # gradients_of_extractor = extractor_tape.gradient(total_extractor_loss, extractor.trainable_variables)
+    # extractor_optimizer.apply_gradients(zip(gradients_of_extractor, extractor.trainable_variables))
+
     return {
       "outputs": {
         "original_images": batch_original,
-        "reconstructed_images": generated_images,
-        "landmark_reconstructed": landmark_reconstructed,
-        "face_mask_reconstructed": face_mask_reconstructed,
-        "face_part_reconstructed": face_part_reconstructed,
+        "reconstructed_images": icr,
+        "landmark_reconstructed": icr_landmarks,
+        "face_mask_reconstructed": icr_mask,
+        "face_part_reconstructed": icr_part,
       },
       "losses": {	
-        "total_loss": total_loss,
-        "gen_loss": gen_loss,
-        "global_disc_loss": disc_loss,
-        "local_disc_loss": local_discriminator_loss,
-        "extractor_reconstruction_loss": tf.reduce_mean(extractor_reconstruction_loss),
-        "extractor_kl_loss": tf.reduce_mean(extractor_kl_loss),
-        "landmark_reconstruction_loss": tf.reduce_mean(landmark_loss),
-        "face_mask_reconstruction_loss": tf.reduce_mean(face_mask_loss),
-        "face_part_reconstruction_loss": tf.reduce_mean(face_part_loss),
-        "landkmark_kl_loss": tf.reduce_mean(landmark_kl_loss),
-        "face_mask_kl_loss": tf.reduce_mean(face_mask_kl_loss),
-        "landmark_consistency_loss": (landmark_consistency_loss),
-        "face_consistency_loss": (face_consistency_loss),
+        "total/total_generator_loss": total_generator_loss,
+        "total/total_embedding_loss": total_embedding_loss,
+        "total/total_extractor_loss": total_extractor_loss,
+        "total/global_disc_loss": global_discriminator_loss,
+        "total/local_disc_loss": local_discriminator_loss,
+        "extractor/kl_loss": (extractor_kl_loss),
+        "extractor/consistency_loss": extractor_consistency_loss,
+        "embedding/landmark_reconstruction_loss": (landmark_reconstruction_loss),
+        "embedding/face_mask_reconstruction_loss": (face_mask_reconstruction_loss),
+        "embedding/face_part_reconstruction_loss": (face_part_reconstruction_loss),
+        "embedding/z1_kl_loss": (z1_kl_loss),
+        "embedding/z2_kl_loss": (z2_kl_loss),
+        "embedding/consistency_loss": (consistency_embedding_loss),
+        "generator/reconstruction_loss": (gan_reconstruction_loss),
+        "generator/landmarks_consistency_loss": (icr_landmark_loss),
+        "generator/face_mask_consistency_loss": (icr_face_mask_loss),
+        "generator/face_part_consistency_loss": (icr_face_part_loss),
+        "generator/local_loss": (local_generator_loss),
+        "generator/global_loss": (global_generator_loss),
+        # "extractor_reconstruction_loss": tf.reduce_mean(extractor_reconstruction_loss),
+        # "extractor_kl_loss": tf.reduce_mean(extractor_kl_loss),
+        # "landmark_reconstruction_loss": tf.reduce_mean(landmark_loss),
+        # "face_mask_reconstruction_loss": tf.reduce_mean(face_mask_loss),
+        # "face_part_reconstruction_loss": tf.reduce_mean(face_part_loss),
+        # "landkmark_kl_loss": tf.reduce_mean(landmark_kl_loss),
+        # "face_mask_kl_loss": tf.reduce_mean(face_mask_kl_loss),
+        # "landmark_consistency_loss": (landmark_consistency_loss),
+        # "face_consistency_loss": (face_consistency_loss),
         # "consistency_loss": consistency_loss,
+        # "/extractor/kl_loss": (extractor_kl_loss),
+        # "/extractor/l1_loss": (extractor_l1_loss),
       }
     }
 
