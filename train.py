@@ -283,14 +283,19 @@ def train_step(batch):
 
       landmark_reconstruction_loss = reconstruction_loss(zr_landmarks, (tbatch_landmarks + 1.) / 2., tf.constant(7.))
       face_mask_reconstruction_loss = 0.5 * reconstruction_loss(zr_mask, (tbatch_face_mask + 1.) / 2., tf.constant(3.5))
-      face_part_reconstruction_loss = l1_reconstruction_loss(zr_part, tbatch_face_part)
+      face_part_reconstruction_loss = 0.5 * l1_reconstruction_loss(zr_part, tbatch_face_part)
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
 
       zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
 
       # Embedding consistency loss
-      _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(tbatch_original, extractor_sample, zero_mask)
-      consistency_embedding_loss = l1_loss_dim1(z_emb, zemb_no_mask)
+      # _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(tbatch_original, extractor_sample, zero_mask)
+      lnomask_mu, lnomask_log_var  = landmark_encoder([tbatch_original, extractor_sample, zero_mask], training=True)
+      lnomask_sample = sampling(lnomask_mu, lnomask_log_var)
+      fnomask_mu, fnomask_log_var  = face_encoder([tbatch_original, extractor_sample, zero_mask], training=True)
+      fnomask_sample = sampling(fnomask_mu, fnomask_log_var)
+      z_emb_no_mask = tf.concat([lnomask_sample, fnomask_sample], axis=-1)
+      consistency_embedding_loss = l1_loss_dim1(z_emb, z_emb_no_mask)
       
       # Embedding kl loss
       z1_kl_loss = kl_divergence_loss(zlr_mu, zlr_log_var)
@@ -592,7 +597,7 @@ def train(dataset, epochs):
                           epoch = epoch + 1,
                           args = seed)
 
-    if (epoch + 1) % 4 == 0 and False:
+    if (epoch + 1) % 4 == 0 and not False:
       outputs = values["outputs"]
       original_image = outputs["original_images"][0]
       landmark_sample = outputs["landmark_reconstructed"][0]
