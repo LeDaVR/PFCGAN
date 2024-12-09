@@ -100,15 +100,15 @@ def make_landmark_encoder():
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z1])
+    x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z2])
+    x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z3])
+    x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z4])
+    x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z5])
+    x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
 
     out_dim = 256

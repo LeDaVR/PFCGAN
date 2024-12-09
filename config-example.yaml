@@ -1,0 +1,3 @@
+paths:
+  original_img_dir: "path/to/original/images"
+  feature_img_dir: "path/to/processed/images"
