@@ -19,7 +19,7 @@ def make_extractor_model():
     z_log_var = layers.Dense(out_dim, name="z_log_var")(x)
     
     # Model outputs
-    return tf.keras.Model(inputs=[input_image], outputs=[z_mean, z_log_var], name="extractor")
+    return tf.keras.Model(inputs=[input_image], outputs=[tf.clip_by_value(z_mean, -10, 10), tf.clip_by_value(z_log_var, -10, 10)])
 
 ### The Generator
 
@@ -100,22 +100,22 @@ def make_landmark_encoder():
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z1])
+    x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z2])
+    x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z3])
+    x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z4])
+    x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z5])
+    x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
 
     out_dim = 256
     z_mean = layers.Dense(out_dim)(x)
     z_log_var = layers.Dense(out_dim)(x)
 
-    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[tf.clip_by_value(z_mean, -10, 10), tf.clip_by_value(z_log_var, -10, 10)], name="landmark_encoder")
 
     return model
 
@@ -141,22 +141,22 @@ def make_face_encoder():
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z1])
+    x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z2])
+    x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z3])
+    x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z4])
+    x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z5])
+    x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
 
     out_dim = 256
     z_mean = layers.Dense(out_dim)(x)
     z_log_var = layers.Dense(out_dim)(x)
 
-    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[tf.clip_by_value(z_mean, -10, 10), tf.clip_by_value(z_log_var, -10, 10)], name="landmark_encoder")
 
     return model
 
