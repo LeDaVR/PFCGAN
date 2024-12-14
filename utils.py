@@ -43,7 +43,7 @@ def mask_rgb(batch_size):
     
     return rgb_mask
 
-def generate_and_save_images(model, args, epoch, show=False):
+def generate_and_save_images(model, args, step, show=False):
     predictions = model(args, training=False)
 
     fig = plt.figure(figsize=(6, 6))
@@ -54,7 +54,7 @@ def generate_and_save_images(model, args, epoch, show=False):
         plt.imshow((img +1.) /2.)
         plt.axis('off')
 
-    plt.savefig('res/image_at_epoch_{:04d}.png'.format(epoch))
+    plt.savefig('res/image_at_step_{:04d}.png'.format(step))
     if show:
         plt.show()
     plt.close()

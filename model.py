@@ -6,7 +6,7 @@ from utils import mask_rgb
 ## Create the models
 
 def make_extractor_model():
-    input_image = layers.Input(shape=(128, 128, 8))
+    input_image = layers.Input(shape=(128, 128, 5))
     x = layers.Conv2D(32, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(input_image)    
     x = layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)    
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)    
@@ -15,8 +15,8 @@ def make_extractor_model():
 
     out_dim = 512
 
-    z_mean = layers.Dense(out_dim, name="z_mean")(x)
-    z_log_var = layers.Dense(out_dim, name="z_log_var")(x)
+    z_mean = tf.clip_by_value(layers.Dense(out_dim, name="z_mean")(x), -10, 10) 
+    z_log_var = tf.clip_by_value(layers.Dense(out_dim, name="z_log_var")(x), -10, 10)
     
     # Model outputs
     return tf.keras.Model(inputs=[input_image], outputs=[z_mean, z_log_var], name="extractor")
@@ -112,8 +112,8 @@ def make_landmark_encoder():
     x = layers.Flatten()(x)
 
     out_dim = 256
-    z_mean = layers.Dense(out_dim)(x)
-    z_log_var = layers.Dense(out_dim)(x)
+    z_mean = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
+    z_log_var = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
 
     model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
@@ -153,8 +153,8 @@ def make_face_encoder():
     x = layers.Flatten()(x)
 
     out_dim = 256
-    z_mean = layers.Dense(out_dim)(x)
-    z_log_var = layers.Dense(out_dim)(x)
+    z_mean = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
+    z_log_var = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
 
     model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
