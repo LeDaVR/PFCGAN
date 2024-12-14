@@ -288,7 +288,7 @@ def train_step(batch):
       zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
 
       # Embedding consistency loss
-      _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(tbatch_original, extractor_sample, zero_mask)
+      _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(tbatch_original, extractor_sample, zero_mask, training=False)
       consistency_embedding_loss = l1_loss_dim1(z_emb, zemb_no_mask)
       
       # Embedding kl loss
