@@ -281,7 +281,7 @@ def train_step(batch):
       icr = generator([z_emb, tbatch_original_incomplete, lbatch_mask[:,:,:,0:1]], training=True)
 
       landmark_reconstruction_loss =  reconstruction_loss(icr_landmarks, (tbatch_landmarks + 1.) / 2., tf.constant(7.))
-      face_mask_reconstruction_loss = 2 * reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., tf.constant(3.5))
+      face_mask_reconstruction_loss = 2 * reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., tf.constant(2.5))
       face_part_reconstruction_loss = 2 * l1_reconstruction_loss(icr_face_part, tbatch_face_part)
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
 
