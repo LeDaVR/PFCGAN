@@ -417,26 +417,27 @@ def train(dataset, epochs):
                               step = total_steps + 1,
                               args = seed)
         checkpoint.save(file_prefix = checkpoint_prefix)
-        display.clear_output(wait=True)
-        outputs = values["outputs"]
-        original_image = outputs["original_images"][0]
-        landmark_sample = outputs["landmark_reconstructed"][0]
-        mask_sample = outputs["face_mask_reconstructed"][0]
-        face_part_samle = outputs["face_part_reconstructed"][0]
-        fig = plt.figure(figsize=(6, 6))
-        plt.subplot(1, 4, 1)
-        plt.imshow(tf.sigmoid(landmark_sample) , cmap='gray')
-        plt.axis('off')
-        plt.subplot(1, 4, 2)
-        plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
-        plt.axis('off')
-        plt.subplot(1, 4, 3)
-        plt.imshow((face_part_samle + 1.) / 2.)
-        plt.axis('off')
-        plt.subplot(1, 4, 4)
-        plt.imshow((original_image + 1.) / 2.)
-        plt.axis('off')
-        plt.show()
+        if config["utils"]["show_embedding"]:
+          display.clear_output(wait=True)
+          outputs = values["outputs"]
+          original_image = outputs["original_images"][0]
+          landmark_sample = outputs["landmark_reconstructed"][0]
+          mask_sample = outputs["face_mask_reconstructed"][0]
+          face_part_samle = outputs["face_part_reconstructed"][0]
+          fig = plt.figure(figsize=(6, 6))
+          plt.subplot(1, 4, 1)
+          plt.imshow(tf.sigmoid(landmark_sample) , cmap='gray')
+          plt.axis('off')
+          plt.subplot(1, 4, 2)
+          plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
+          plt.axis('off')
+          plt.subplot(1, 4, 3)
+          plt.imshow((face_part_samle + 1.) / 2.)
+          plt.axis('off')
+          plt.subplot(1, 4, 4)
+          plt.imshow((original_image + 1.) / 2.)
+          plt.axis('off')
+          plt.show()
 
 
 

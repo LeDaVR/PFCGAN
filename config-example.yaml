@@ -4,3 +4,5 @@ paths:
 hyper_parameters:
   batch_size: 12
   epochs: 80
+utils:
+  show_embedding: False
