@@ -43,13 +43,13 @@ def mask_rgb(batch_size):
     
     return rgb_mask
 
-def generate_and_save_images(model, args, step, show=False):
-    predictions = model(args, training=False)
+
+def generate_and_save_images(predictions, original, mask, step, show=False):
 
     fig = plt.figure(figsize=(6, 6))
 
     for i in range(tf.shape(predictions)[0]):
-        img = (predictions[i] * args[2][i]) + (args[1][i] * (1. - args[2][i]))
+        img = (predictions[i] * mask[i]) + (original[i] * (1. - mask[i]))
         plt.subplot(4, 4, i+1)
         plt.imshow((img +1.) /2.)
         plt.axis('off')

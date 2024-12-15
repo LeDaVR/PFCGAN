@@ -1,4 +1,3 @@
-from re import X
 import tensorflow as tf
 from tensorflow.keras import layers
 from utils import mask_rgb
@@ -35,7 +34,7 @@ def make_generator_model():
     # Concatenar la imagen de entrada si es necesario    
     # ones_x = layers.Lambda(lambda x: tf.ones_like(x)[:, :, :, 0:1])(input_image)  # Fix the operation with Lambda layer
     # print("mask", tf.shape(mask), tf.shape(ones_x))
-    x = layers.Concatenate(axis=-1, name="concat_mask")([input_image, mask ])
+    x = layers.Concatenate(axis=-1, name="concat_mask")([input_image, mask])
     x = layers.Conv2D(32, (3, 3), strides=(1, 1), padding='same', activation='relu')(x)    
     x = c1 = layers.Conv2D(32, (3, 3), strides=(1, 1), padding='same', activation='relu')(x)    
     x = layers.Conv2D(64, (3, 3), strides=(2, 2), padding='same', activation='relu')(x)
