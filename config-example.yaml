@@ -6,3 +6,6 @@ hyper_parameters:
   epochs: 80
 utils:
   show_embedding: False
+train:
+  log_interval: 20
+  save_interval: 7000

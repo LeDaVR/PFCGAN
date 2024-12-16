@@ -154,10 +154,10 @@ def kl_divergence_loss(mean, logvar):
 #
 #     return x_logit, -tf.reduce_mean(recon_loss + kl_loss)
 
-# generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-global_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-local_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
-face_embedding_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+generator_optimizer = tf.keras.optimizers.Adam(1e-4, beta_1=0.5)
+global_discriminator_optimizer = tf.keras.optimizers.Adam(1e-4, beta_1=0.5)
+local_discriminator_optimizer = tf.keras.optimizers.Adam(1e-4, beta_1=0.5)
+face_embedding_optimizer = tf.keras.optimizers.Adam(1e-4, beta_1=0.5)
 # extractor_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 
  
@@ -171,6 +171,7 @@ checkpoint = tf.train.Checkpoint(
                                  global_discriminator_optimizer=global_discriminator_optimizer,
                                  face_embedding_optimizer=face_embedding_optimizer,
                                  local_discriminator_optimizer=local_discriminator_optimizer,
+                                 generator_optimizer=generator_optimizer,
                                  extractor=extractor,
                                  generator=generator,
                                  discriminator=discriminator,
@@ -230,7 +231,8 @@ writer = tf.summary.create_file_writer(log_dir)
 def train_step(batch):
     with tf.GradientTape() as global_disc_tape, \
       tf.GradientTape() as embedding_tape, \
-      tf.GradientTape() as local_discriminator_tape:
+      tf.GradientTape() as local_discriminator_tape,\
+      tf.GradientTape() as generator_tape:
 
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
@@ -302,11 +304,11 @@ def train_step(batch):
       # Consistency Loss
       _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr, extractor_sample, zero_mask, training=False)
       icr_landmark_loss = l1_reconstruction_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks))
-      icr_face_mask_loss = l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
-      icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
+      # icr_face_mask_loss = l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
+      # icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
 
-      icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
-      # icr_consistency_loss = 0
+      # icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
+      icr_consistency_loss = icr_landmark_loss
 
       # Discriminator loss
 
@@ -332,20 +334,20 @@ def train_step(batch):
 
       total_generator_loss = gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss
 
-      total_embedding_loss += total_generator_loss
-
     face_embedding_trainable_variables = (
       extractor.trainable_variables + 
       face_encoder.trainable_variables + 
       landmark_encoder.trainable_variables +
       face_mask_decoder.trainable_variables + 
       face_part_decoder.trainable_variables+ 
-      landmark_decoder.trainable_variables + 
-      generator.trainable_variables
+      landmark_decoder.trainable_variables  
     )
 
     gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
     face_embedding_optimizer.apply_gradients(zip(gradients_of_embedding, face_embedding_trainable_variables))
+
+    gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
+    generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
 
     gradients_of_global_discriminator = global_disc_tape.gradient(global_discriminator_loss, discriminator.trainable_variables)
     global_discriminator_optimizer.apply_gradients(zip(gradients_of_global_discriminator, discriminator.trainable_variables))
@@ -377,8 +379,8 @@ def train_step(batch):
         "embedding/consistency_loss": (consistency_embedding_loss),
         "generator/reconstruction_loss": (gan_reconstruction_loss),
         "generator/landmarks_consistency_loss": (icr_landmark_loss),
-        "generator/face_mask_consistency_loss": (icr_face_mask_loss),
-        "generator/face_part_consistency_loss": (icr_face_part_loss),
+        # "generator/face_mask_consistency_loss": (icr_face_mask_loss),
+        # "generator/face_part_consistency_loss": (icr_face_part_loss),
         "generator/local_loss": (local_generator_loss),
         "generator/global_loss": (global_generator_loss),
         # "extractor_reconstruction_loss": tf.reduce_mean(extractor_reconstruction_loss),
@@ -405,12 +407,24 @@ def train(dataset, epochs):
       values = train_step(image_batch)
       total_steps += 1
 
-      if total_steps % 20 == 0:
+      if total_steps % config["train"]["log_interval"] == 0:
         with writer.as_default():
           for name, value in values["losses"].items():
-            tf.summary.scalar(name, value, step=epoch)
+            tf.summary.scalar(name, value, step=total_steps)
+          # TODO: Improve image saving
+          # original_images = (values["outputs"]["original_images"] + 1.) / 2.
+          # reconstructed_images = (values["outputs"]["reconstructed_images"] + 1.) / 2.
+          # landmark_reconstructed = tf.sigmoid(values["outputs"]["landmark_reconstructed"])
+          # face_mask_reconstructed = tf.sigmoid(values["outputs"]["face_mask_reconstructed"])
+          # face_part_reconstructed = (values["outputs"]["face_part_reconstructed"] + 1.) / 2.
+          # tf.summary.image("original_images", original_images, step=total_steps)
+          # tf.summary.image("reconstructed_images", reconstructed_images, step=total_steps)
+          # tf.summary.image("landmark_reconstructed", landmark_reconstructed, step=total_steps)
+          # tf.summary.image("face_mask_reconstructed", face_mask_reconstructed, step=total_steps)
+          # tf.summary.image("face_part_reconstructed", face_part_reconstructed, step=total_steps)
+            
 
-      if total_steps % 100 == 0:
+      if total_steps % config["train"]["save_interval"] == 0:
         tf.print("losses", values["losses"])	
         predictions = inference(pfcGan.landmark_encoder, 
                                 pfcGan.landmark_decoder, 

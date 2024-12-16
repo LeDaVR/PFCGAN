@@ -1,3 +1,6 @@
+import sys
+import os
+import dlib
 import cv2
 import numpy as np
 import glob
@@ -5,8 +8,6 @@ from tqdm import tqdm
 
 import argparse
 import os
-
-import dlib
 
 def crop(img):
     height, _ = img.shape[:2]
@@ -30,12 +31,10 @@ parser.add_argument('--progress_file', type=str, help="Archivo que contiene el n
 # Parsear los argumentos
 args = parser.parse_args()
 
-print("starting")
 # Lógica para el modo 'clean'
 if args.mode == 'clean':
     print("Modo limpio seleccionado. Limpiando...")
     # Aquí va el código para el modo 'clean'
-
 
 # Lógica para el modo 'continue', donde los argumentos `--folder` y `--model` son requeridos
 elif args.mode == 'continue':
@@ -92,8 +91,60 @@ elif args.mode == 'continue':
                 landmarks = np.array([(p.x, p.y) for p in shape.parts()])
 
                 landmark_img = np.zeros(img.shape, dtype = np.uint8)
-                for (x, y) in landmarks:
-                    cv2.circle(landmark_img, (x, y), 1, (255, 255, 255), -1)
+                # for (x, y) in landmarks:
+                #     cv2.circle(landmark_img, (x, y), 2, (255, 255, 255), -1)
+                for i in range(0, 16):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part(i+1).x, shape.part(i+1).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Right eyebrow
+                for i in range(17, 21):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part(i+1).x, shape.part(i+1).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Left eyebrow
+                for i in range(22, 26):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part(i+1).x, shape.part(i+1).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Nose bridge
+                for i in range(27, 30):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part(i+1).x, shape.part(i+1).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Nose bottom
+                for i in range(30, 35):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part(i+1).x, shape.part(i+1).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Right eye
+                for i in range(36, 41):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part((i+1) % 42).x, shape.part((i+1) % 42).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Left eye
+                for i in range(42, 47):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part((i+1) % 48).x, shape.part((i+1) % 48).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Outer lip
+                for i in range(48, 59):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part((i+1) % 60).x, shape.part((i+1) % 60).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
+                
+                # Inner lip
+                for i in range(60, 67):
+                    pt1 = (shape.part(i).x, shape.part(i).y)
+                    pt2 = (shape.part((i+1) % 68).x, shape.part((i+1) % 68).y)
+                    cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
 
                 hull = cv2.convexHull(landmarks)
                 mask = np.zeros_like(img_gray)
