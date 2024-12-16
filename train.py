@@ -245,23 +245,22 @@ def train_step(batch):
 
       # Extractor 
 
-      # z_random = tf.random.normal(shape = [batch_size, noise_dim])
+      z_random = tf.random.normal(shape = [batch_size, noise_dim])
 
-      # _, zf_emb, zf_landmarks, zf_mask, zf_part = feature_embedding(tbatch_original_incomplete, z_random, lbatch_mask[:,:,:,0:1], training=False)
-      # icf = generator([zf_emb, tbatch_original_incomplete, lbatch_mask[:,:,:,0:1]], training=True)
+      _, zf_emb, zf_landmarks, zf_mask, zf_part = feature_embedding(tbatch_original_incomplete, z_random, lbatch_mask[:,:,:,0:1], training=False)
 
-      # z_generated_mu, z_generated_log_var = extractor(tf.concat([tf.tanh(zf_landmarks), tf.tanh(zf_mask), zf_part], axis=-1), training=False)
-      # generated_sample = reparametrize(z_generated_mu, z_generated_log_var)
+      z_generated_mu, z_generated_log_var = extractor(tf.concat([tf.tanh(zf_landmarks), tf.tanh(zf_mask), zf_part], axis=-1), training=True)
+      generated_sample = reparametrize(z_generated_mu, z_generated_log_var)
 
-      #Extractor loss
-      # extractor_consistency_loss = l1_loss_dim1(generated_sample, z_random)
+      # Extractor loss
+      extractor_consistency_loss = l1_loss_dim1(generated_sample, z_random)
 
       # Face Embedding
       e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=True)
       extractor_sample = reparametrize(e_mu, e_log_var)
       extractor_kl_loss = kl_divergence_loss(e_mu, e_log_var)
 
-      total_extractor_loss = extractor_kl_loss
+      total_extractor_loss = extractor_kl_loss + extractor_consistency_loss
 
       # (z1,z2), zr_emb, zr_landmarks, zr_mask, zr_part = feature_embedding(batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1])
 
