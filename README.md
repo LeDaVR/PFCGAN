@@ -8,7 +8,7 @@ execute `python preprocess.py` to preprocess the dataset.
 ```
 pip install dlib==19.24.6
 
-python preprocess.py --mode continue --model shape_predictor_68_face_landmarks.dat --folder 'path/to/dataset' --progress_file checkpoint.txt
+python preprocess.py --mode continue --model shape_predictor_68_face_landmarks.dat --folder "path/to/data" --progress_file checkpoint.txt --output_folder "path/to/output"
 ```
 
 ## Generating flists
