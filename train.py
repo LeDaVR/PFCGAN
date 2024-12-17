@@ -34,6 +34,10 @@ feature_img_dir = config["paths"]["feature_img_dir"]
 # Hyperparameters
 EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
+w_landmarks = 0.3
+w_face_mask = 0.2
+w_face_part = 0.5
+b_kl = 0.2
 
 
 train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
@@ -258,7 +262,7 @@ def train_step(batch):
       # Face Embedding
       e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=True)
       extractor_sample = reparametrize(e_mu, e_log_var)
-      extractor_kl_loss = kl_divergence_loss(e_mu, e_log_var)
+      extractor_kl_loss = b_kl *  kl_divergence_loss(e_mu, e_log_var)
 
       total_extractor_loss = extractor_kl_loss + extractor_consistency_loss
 
@@ -279,9 +283,9 @@ def train_step(batch):
 
       icr = generator([z_emb, tbatch_original_incomplete, lbatch_mask[:,:,:,0:1]], training=True)
 
-      landmark_reconstruction_loss =  reconstruction_loss(icr_landmarks, (tbatch_landmarks + 1.) / 2., tf.constant(7.))
-      face_mask_reconstruction_loss = reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., tf.constant(2.5))
-      face_part_reconstruction_loss = l1_reconstruction_loss(icr_face_part, tbatch_face_part)
+      landmark_reconstruction_loss = w_landmarks *  reconstruction_loss(icr_landmarks, (tbatch_landmarks + 1.) / 2., tf.constant(7.))
+      face_mask_reconstruction_loss = w_face_mask * reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., tf.constant(2.5))
+      face_part_reconstruction_loss = w_face_part * l1_reconstruction_loss(icr_face_part, tbatch_face_part)
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
 
       zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
@@ -291,8 +295,8 @@ def train_step(batch):
       consistency_embedding_loss = l1_loss_dim1(z_emb, zemb_no_mask)
       
       # Embedding kl loss
-      z1_kl_loss = kl_divergence_loss(zlr_mu, zlr_log_var)
-      z2_kl_loss = kl_divergence_loss(zfr_mu, zfr_log_var)
+      z1_kl_loss = b_kl * kl_divergence_loss(zlr_mu, zlr_log_var)
+      z2_kl_loss = b_kl *  kl_divergence_loss(zfr_mu, zfr_log_var)
 
       total_embedding_loss = embedding_reconstruction_loss + consistency_embedding_loss + z1_kl_loss + z2_kl_loss + total_extractor_loss
 
@@ -369,7 +373,7 @@ def train_step(batch):
         "total/global_disc_loss": global_discriminator_loss,
         "total/local_disc_loss": local_discriminator_loss,
         "extractor/kl_loss": (extractor_kl_loss),
-        # "extractor/consistency_loss": extractor_consistency_loss,
+        "extractor/consistency_loss": extractor_consistency_loss,
         "embedding/landmark_reconstruction_loss": (landmark_reconstruction_loss),
         "embedding/face_mask_reconstruction_loss": (face_mask_reconstruction_loss),
         "embedding/face_part_reconstruction_loss": (face_part_reconstruction_loss),
@@ -402,9 +406,10 @@ def train(dataset, epochs):
   for epoch in range(epochs):
     start = time.time()
     for step, image_batch in enumerate(dataset):
-      print("epoch %d step %d" % (epoch + 1, step + 1))
       values = train_step(image_batch)
       total_steps += 1
+      if total_steps % config["train"]["log_interval"] == 0:
+        print("epoch %d step %d" % (epoch + 1, step + 1))
 
       if total_steps % config["train"]["log_interval"] == 0:
         with writer.as_default():
@@ -435,11 +440,11 @@ def train(dataset, epochs):
                                 batch_incomplete = sample,
                                 batch_mask = mask_batch[:,:,:,0:1])
         # predictions = (predictions[i] * args[2][i]) + (args[1][i] * (1. - args[2][i]))
+        checkpoint.save(file_prefix = checkpoint_prefix)
         generate_and_save_images(predictions = predictions,
                                  original=sample,
                                  mask=mask_batch,
                                  step = total_steps + 1)
-        checkpoint.save(file_prefix = checkpoint_prefix)
         if config["utils"]["show_embedding"]:
           display.clear_output(wait=True)
           outputs = values["outputs"]

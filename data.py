@@ -84,3 +84,16 @@ def create_image_dataset(original_img_dir, feature_img_dir, batch_size=32, targe
     list_ds = list_ds.filter(lambda x: tf.shape(x)[0] == batch_size)
 
     return list_ds
+
+def load_test_set(original_img_dir, batch_size=32, target_size=(128, 128)):
+    # Nombre base de la imagen
+    original_img_paths = [
+        os.path.join(original_img_dir, f) 
+        for f in os.listdir(original_img_dir) 
+        if f.endswith('.jpg')
+    ]
+    list_ds = tf.data.Dataset.from_tensor_slices(original_img_paths)
+
+    AUTOTUNE = tf.data.AUTOTUNE
+
+    list_ds = list_ds.batch(1)
