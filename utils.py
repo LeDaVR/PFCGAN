@@ -1,45 +1,69 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import numpy as np
 
-def create_inpainting_mask(image_size=(128, 128)):
-    # Crear tensor de la mitad del tamaño
-    mask_center = tf.ones((image_size[0]//2, image_size[1]//2), dtype=tf.float32)
-    
-    # Aplicar padding para llevarlo al tamaño original
-    paddings = tf.constant([
-        [image_size[0]//4, image_size[0]//4],  # Padding vertical
-        [image_size[1]//4, image_size[1]//4]   # Padding horizontal
-    ])
-    
-    # Aplicar padding
-    out = tf.pad(mask_center, paddings, mode='CONSTANT', constant_values=0)
-    
-    return tf.expand_dims(out, -1)
+def generate_random_mask(image_height, image_width):
+    """
+    Genera una máscara aleatoria para una imagen de dimensiones dadas.
 
-def create_batch_mask(size):
-    new_mask = create_inpainting_mask()
-    batch_mask =  tf.expand_dims(new_mask, 0)
-    batch_mask = tf.tile(batch_mask, [size, 1, 1, 1])
-    return batch_mask
+    Args:
+        image_height (int): Altura de la imagen.
+        image_width (int): Ancho de la imagen.
+
+    Returns:
+        tf.Tensor: Máscara binaria de forma (image_height, image_width).
+    """
+    # Porcentaje aleatorio de la imagen que cubrirá la máscara
+    mask_height_pct = tf.random.uniform([], 0.2, 0.6)
+    mask_width_pct = tf.random.uniform([], 0.2, 0.6)
+
+    # Tamaño de la máscara en píxeles
+    mask_height = tf.cast(mask_height_pct * image_height, tf.int32)
+    mask_width = tf.cast(mask_width_pct * image_width, tf.int32)
+
+    # Desplazamiento aleatorio dentro del rango permitido
+    max_shift_x = (image_width - mask_width) // 8
+    max_shift_y = (image_height - mask_height) // 8
+
+    shift_x = tf.random.uniform([], -max_shift_x, max_shift_x, dtype=tf.int32)
+    shift_y = tf.random.uniform([], -max_shift_y, max_shift_y, dtype=tf.int32)
+
+    # Coordenadas del centro de la imagen
+    center_x = image_width // 2
+    center_y = image_height // 2
+
+    # Coordenadas iniciales y finales de la máscara
+    x_start = tf.clip_by_value(center_x - mask_width // 2 + shift_x, image_width // 8, (7 * image_width) // 8)
+    y_start = tf.clip_by_value(center_y - mask_height // 2 + shift_y, image_height // 8, (7 * image_height) // 8)
+
+    x_end = tf.clip_by_value(x_start + mask_width, image_width // 8, (7 * image_width) // 8)
+    y_end = tf.clip_by_value(y_start + mask_height, image_height // 8, (7 * image_height) // 8)
+
+    # Crear la máscara
+    mask = tf.zeros((image_height, image_width), dtype=tf.float32)
+
+    # Llenar la región seleccionada con unos
+    mask = tf.tensor_scatter_nd_update(
+        mask,
+        indices=tf.reshape(tf.stack(tf.meshgrid(tf.range(y_start, y_end), tf.range(x_start, x_end), indexing='ij'), axis=-1), (-1, 2)),
+        updates=tf.ones(((y_end - y_start) * (x_end - x_start),), dtype=tf.float32)
+    )
+    mask = tf.expand_dims(mask, axis=-1)
+
+    return mask
+
+def create_batch_mask(size, image_size=[128, 128]):
+    masks = [generate_random_mask(image_size[0], image_size[1]) for _ in range(size)]
+    return tf.stack(masks)
 
 def mask_rgb(batch_size):
-    image_size = (128, 128)
+    image_size = [128, 128]
     
-    # Crear máscara central
-    mask_center = tf.zeros(image_size, dtype=tf.float32)
-    mask_center = tf.tensor_scatter_nd_update(
-        mask_center, 
-        [[image_size[0]//4 + i, image_size[1]//4 + j] 
-         for i in range(image_size[0]//2) 
-         for j in range(image_size[1]//2)], 
-        tf.ones((image_size[0]//2 * image_size[1]//2))
-    )
+    # Genera máscaras en escala de grises
+    gray_mask = create_batch_mask(batch_size, image_size)
     
-    # Asegurar dimensiones correctas
-    gray_mask = tf.reshape(mask_center, [image_size[0], image_size[1], 1])
-    
-    # Expandir a máscara RGB para todo el batch
-    rgb_mask = tf.tile(tf.expand_dims(gray_mask, 0), [batch_size, 1, 1, 3])
+    # Convierte a máscara RGB
+    rgb_mask = tf.repeat(gray_mask, repeats=3, axis=-1)
     
     return rgb_mask
 

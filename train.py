@@ -43,39 +43,6 @@ b_kl = 0.2
 train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
 print(train_dataset)
 
-# # Visualizar
-# plt.figure(figsize=(8,6))
-# plt.imshow(create_inpainting_mask(), cmap='gray')
-# plt.title('Máscara de Inpainting')
-# plt.colorbar()
-# plt.show()
-
-# # normalization_layer = tf.keras.layers.Rescaling(1./255, offset=-1)
-# # train_dataset = train_images.map(lambda x: normalization_layer(x))
-
-# # Batch and shuffle the data
-# #train_dataset = tf.data.Dataset.from_tensor_slices(train_images).shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
-# train_dataset = dataset
-
-# def show_images(train_dataset):
-#   fig = plt.figure(figsize=(4, 4))
-#   for x, i in  enumerate(train_dataset.take(4)):
-#       plt.subplot(4, 4, x * 4+ 1)
-#       plt.imshow((i[0,:,:,0:3] +1.) /2.)
-#       plt.axis('off')
-#       plt.subplot(4, 4, x * 4 + 2)
-#       plt.imshow((i[0,:,:,3] +1.) /2., cmap='gray')
-#       plt.axis('off')
-#       plt.subplot(4, 4, x * 4 + 3)
-#       plt.imshow((i[0,:,:,4] +1.) /2., cmap='gray')
-#       plt.axis('off')
-#       plt.subplot(4, 4, x * 4 + 4)
-#       plt.imshow((i[0,:,:,5:8] +1.) /2.)
-#       plt.axis('off')
-#   plt.show()
-
-# plt.show()
-
 generator = make_generator_model()
 discriminator = make_discriminator_model()
 local_discriminator = make_local_discriminator()
@@ -221,18 +188,13 @@ num_examples_to_generate = batch_size
 
 # You will reuse this seed overtime (so it's easier)
 # to visualize progress in the animated GIF)
-mask_batch = mask_rgb(num_examples_to_generate)
-z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
-for item in train_dataset.take(1):
-  sample = item[:,:,:,0:3] * (1. - mask_batch)
-seed = [z_seed, sample, mask_batch[:,:,:,0:1]]
 log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 writer = tf.summary.create_file_writer(log_dir)
 
 # Notice the use of `tf.function`
 # This annotation causes the function to be "compiled".
 @tf.function
-def train_step(batch):
+def train_step(batch, lbatch_mask):
     with tf.GradientTape() as global_disc_tape, \
       tf.GradientTape() as embedding_tape, \
       tf.GradientTape() as local_discriminator_tape,\
@@ -240,7 +202,7 @@ def train_step(batch):
 
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
-      lbatch_mask = mask_rgb(batch_size)
+      # lbatch_mask = mask_rgb(batch_size)
       tbatch_original = batch[:,:,:,0:3]
       tbatch_original_incomplete = tbatch_original * (1. - lbatch_mask)
       tbatch_landmarks = batch[:,:,:,3:4]
@@ -268,7 +230,7 @@ def train_step(batch):
 
       # (z1,z2), zr_emb, zr_landmarks, zr_mask, zr_part = feature_embedding(batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1])
 
-      one_channel_mask = mask_batch[:,:,:,0:1]
+      one_channel_mask = lbatch_mask[:,:,:,0:1]
       # Landkard encoder
       zlr_mu, zlr_log_var  = landmark_encoder([tbatch_original_incomplete, extractor_sample, one_channel_mask], training=True)
       zr_l_sample = reparametrize(zlr_mu, zlr_log_var)
@@ -405,8 +367,9 @@ def train(dataset, epochs):
   total_steps = 0
   for epoch in range(epochs):
     start = time.time()
+    batch_of_masks = mask_rgb(batch_size)
     for step, image_batch in enumerate(dataset):
-      values = train_step(image_batch)
+      values = train_step(image_batch, batch_of_masks)
       total_steps += 1
       if total_steps % config["train"]["log_interval"] == 0:
         print("epoch %d step %d" % (epoch + 1, step + 1))
@@ -429,6 +392,10 @@ def train(dataset, epochs):
             
 
       if total_steps % config["train"]["save_interval"] == 0:
+        mask_batch = mask_rgb(num_examples_to_generate)
+        z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
+        for item in train_dataset.take(1):
+          sample = item[:,:,:,0:3] * (1. - mask_batch)
         tf.print("losses", values["losses"])	
         predictions = inference(pfcGan.landmark_encoder, 
                                 pfcGan.landmark_decoder, 
@@ -451,25 +418,49 @@ def train(dataset, epochs):
           original_image = outputs["original_images"][0]
           landmark_sample = outputs["landmark_reconstructed"][0]
           mask_sample = outputs["face_mask_reconstructed"][0]
-          face_part_samle = outputs["face_part_reconstructed"][0]
+          face_part_sample = outputs["face_part_reconstructed"][0]
           reconstructed_image = outputs["reconstructed_images"][0]
-          fig = plt.figure(figsize=(6, 6))
-          plt.subplot(1, 5, 1)
-          plt.imshow(tf.sigmoid(landmark_sample) , cmap='gray')
+          mask = batch_of_masks[0]
+          fig = plt.figure(figsize=(8, 6))
+
+          # Subplot 1: Landmark sample
+          plt.subplot(2, 3, 1)
+          plt.imshow(tf.sigmoid(landmark_sample), cmap='gray')
+          plt.title("Landmark")
           plt.axis('off')
-          plt.subplot(1, 5, 2)
+
+          # Subplot 2: Mask sample
+          plt.subplot(2, 3, 2)
           plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
+          plt.title("Mask")
           plt.axis('off')
-          plt.subplot(1, 5, 3)
-          plt.imshow((face_part_samle + 1.) / 2.)
+
+          # Subplot 3: Face part sample
+          plt.subplot(2, 3, 3)
+          plt.imshow((face_part_sample + 1.) / 2.)
+          plt.title("Face Part")
           plt.axis('off')
-          plt.subplot(1, 5, 4)
+
+          # Subplot 4: Original image
+          plt.subplot(2, 3, 4)
           plt.imshow((original_image + 1.) / 2.)
+          plt.title("Original")
           plt.axis('off')
-          plt.subplot(1, 5, 5)
+
+          # Subplot 5: Reconstructed image
+          plt.subplot(2, 3, 5)
           plt.imshow((reconstructed_image + 1.) / 2.)
+          plt.title("Reconstructed")
           plt.axis('off')
+
+          # Subplot 6: Mask
+          plt.subplot(2, 3, 6)
+          plt.imshow(mask, cmap='gray')
+          plt.title("Random Mask")
+          plt.axis('off')
+
           plt.show()
+          plt.close()
 
 
 
