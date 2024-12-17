@@ -14,8 +14,8 @@ def make_extractor_model():
 
     out_dim = 512
 
-    z_mean = tf.clip_by_value(layers.Dense(out_dim, name="z_mean")(x), -10, 10) 
-    z_log_var = tf.clip_by_value(layers.Dense(out_dim, name="z_log_var")(x), -10, 10)
+    z_mean = layers.Dense(out_dim, kernel_initializer='zeros', name="z_mean")(x)
+    z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros', name="z_log_var")(x), -10, 10)
     
     # Model outputs
     return tf.keras.Model(inputs=[input_image], outputs=[z_mean, z_log_var], name="extractor")
@@ -111,8 +111,8 @@ def make_landmark_encoder():
     x = layers.Flatten()(x)
 
     out_dim = 256
-    z_mean = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
-    z_log_var = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
+    z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
+    z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros')(x), -10, 10)
 
     model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
@@ -152,8 +152,8 @@ def make_face_encoder():
     x = layers.Flatten()(x)
 
     out_dim = 256
-    z_mean = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
-    z_log_var = tf.clip_by_value(layers.Dense(out_dim)(x), -10, 10)
+    z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
+    z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros')(x), -10, 10)
 
     model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 

@@ -412,6 +412,8 @@ def train(dataset, epochs):
                                  original=sample,
                                  mask=mask_batch,
                                  step = total_steps + 1)
+        # Slep 4 minutes
+        # time.sleep(240)
         if config["utils"]["show_embedding"]:
           display.clear_output(wait=True)
           outputs = values["outputs"]

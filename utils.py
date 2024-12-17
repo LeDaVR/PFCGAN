@@ -61,9 +61,11 @@ def mask_rgb(batch_size):
     
     # Genera máscaras en escala de grises
     gray_mask = create_batch_mask(batch_size, image_size)
+    tf.print(tf.shape(gray_mask))
     
     # Convierte a máscara RGB
     rgb_mask = tf.repeat(gray_mask, repeats=3, axis=-1)
+    tf.print(tf.shape(rgb_mask))
     
     return rgb_mask
 

@@ -1,4 +1,4 @@
-from data import create_image_dataset
+from data import load_test_set
 import matplotlib.pyplot as plt
 from utils import mask_rgb
 import tensorflow as tf
@@ -15,11 +15,10 @@ with open("config.yaml", "r") as file:
     config = yaml.safe_load(file)
 
 # Use train data temporarily
-original_img_dir = config["paths"]["original_img_dir"]
-feature_img_dir = config["paths"]["feature_img_dir"]
+original_img_dir = config["paths"]["test_img_dir"]
 batch_size = config["hyper_parameters"]["batch_size"]
 
-train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
+train_dataset = load_test_set(original_img_dir, batch_size=batch_size)
 print(train_dataset)
 
 class PFCGAN():
@@ -57,6 +56,26 @@ checkpoint = tf.train.Checkpoint(
 checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
 
 
+def evaluate_metrics(original_images, generated_images):
+    # From -1 to 1
+    original_images = (original_images + 1.) / 2.
+    generated_images = (generated_images + 1.) / 2.
+
+    # PSNR
+    psnr_values = tf.image.psnr(original_images, generated_images, max_val=1.0)
+
+    # SSIM
+    ssim_values = tf.image.ssim(original_images, generated_images, max_val=1.0)
+
+    metrics = {
+        "PSNR": tf.reduce_mean(psnr_values).numpy(),
+        "SSIM": tf.reduce_mean(ssim_values).numpy(),
+        # "LPIPS": tf.reduce_mean(lpips_values).numpy(),
+    }
+
+    return metrics
+
+
 def reparametrize(z_mean, z_log_sigma):
   eps = tf.random.normal(shape=z_mean.shape)
   return eps * tf.exp(z_log_sigma * .5) + z_mean
@@ -88,14 +107,33 @@ def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, ba
 
 for batch in train_dataset:
     num_examples_to_generate = 4
-    mask_batch = mask_rgb(num_examples_to_generate)
     for step, item in enumerate(batch):
+        mask_batch = mask_rgb(1)
+        mask_batch = tf.repeat(tf.expand_dims(mask_batch[0,:,:,:], 0), repeats=4, axis=0)
         z_seed = tf.random.normal([num_examples_to_generate, 512])
         tf.print(tf.shape(mask_batch))
-        sample = item[:,:,0:3] * (1. - mask_batch[0,:,:,:])
+        samples = []
+        for i in range(4):
+            samples += [item * (1. - mask_batch[i,:,:,:])]
         # create a tensor with 4 times the image
-        sample =  tf.repeat(tf.expand_dims(sample, 0), repeats=4, axis=0)
-        print("queso", sample.shape)
+        # sample =  tf.repeat(tf.expand_dims(sample, 0), repeats=4, axis=0)
+        samples = tf.stack(samples)
+        print("queso", samples.shape)
+        # show images and masks
+        
+        for i in range(4):
+            plt.subplot(2, 4, i+1)
+            plt.imshow((samples[i] + 1.) /2.)
+            plt.axis('off')
+            plt.title("Sample {}".format(i))
+            plt.subplot(2, 4, i+5)
+            plt.imshow(mask_batch[i])
+            plt.axis('off')
+            plt.title("Mask {}".format(i))
+        plt.show()
+        plt.close()
+
+
         predictions = inference(pfcGan.landmark_encoder, 
                                 pfcGan.landmark_decoder, 
                                 pfcGan.face_encoder, 
@@ -103,8 +141,9 @@ for batch in train_dataset:
                                 pfcGan.face_part_decoder, 
                                 pfcGan.generator, 
                                 z = z_seed,
-                                batch_incomplete = sample,
+                                batch_incomplete = samples,
                                 batch_mask = mask_batch[:,:,:,0:1])
-        generate_and_save_images(predictions, sample, mask_batch, step, show=True)
+        generate_and_save_images(predictions, samples, mask_batch, step, show=True)
+        print(evaluate_metrics(tf.stack([item, item , item, item]), predictions))
         print("Inference done for z={}".format(step))
 
