@@ -17,11 +17,11 @@ from utils import generate_and_save_images, mask_rgb
 ### Load and prepare the dataset
 
 # Hyperparameters
-original_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/original'
-feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/processed'
+original_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/train_set/original'
+feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/train_set/processed'
 # original_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/original'
 # feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/processed'
-batch_size = 60
+batch_size = 8
 LANDMARK_RECONSTRUCTION = 2
 FACE_MASK_RECONSTRUCTION = 1
 FACE_PART_RECONSTRUCTION = 4
