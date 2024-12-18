@@ -41,6 +41,8 @@ b_kl = 0.2
 consistency_loss = 0.2
 adversarial_loss = 2
 rec_loss = 0.2
+landmark_factor = 6
+mask_factor = 2.5
 
 
 
@@ -205,11 +207,7 @@ writer = tf.summary.create_file_writer(log_dir)
 # This annotation causes the function to be "compiled".
 @tf.function
 def train_step(batch, lbatch_mask):
-    with tf.GradientTape() as global_disc_tape, \
-      tf.GradientTape() as embedding_tape, \
-      tf.GradientTape() as local_discriminator_tape,\
-      tf.GradientTape() as generator_tape:
-
+    with  tf.GradientTape() as embedding_tape:
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
       # lbatch_mask = mask_rgb(batch_size)
@@ -228,8 +226,8 @@ def train_step(batch, lbatch_mask):
       _, zf_emb, zf_landmarks, zf_mask, zf_part = feature_embedding(tbatch_original_incomplete, z_random, one_channel_mask, training=True)
 
       zf_loss = (
-        w_landmarks * masked_weighted_cross_entropy_loss(zf_landmarks, (tbatch_landmarks + 1.) /  2., 1. - one_channel_mask, tf.constant(7.)) +
-        w_face_mask * masked_weighted_cross_entropy_loss(zf_mask, (tbatch_face_mask + 1.) / 2., 1.- one_channel_mask, tf.constant(2.5)) +
+        w_landmarks * masked_weighted_cross_entropy_loss(zf_landmarks, (tbatch_landmarks + 1.) /  2., 1. - one_channel_mask, (landmark_factor)) +
+        w_face_mask * masked_weighted_cross_entropy_loss(zf_mask, (tbatch_face_mask + 1.) / 2., 1.- one_channel_mask, (mask_factor)) +
         w_face_part * masked_loss(tbatch_face_part, zf_part, (1. - lbatch_mask))
       )
 
@@ -260,62 +258,16 @@ def train_step(batch, lbatch_mask):
       icr_face_mask = face_mask_decoder(z_emb, training=True)
       icr_face_part = face_part_decoder(z_emb, training=True)
 
-      icr = generator([z_emb, tbatch_original_incomplete, lbatch_mask[:,:,:,0:1]], training=True)
-
-      landmark_reconstruction_loss = w_landmarks *  reconstruction_loss(icr_landmarks, (tbatch_landmarks + 1.) / 2., tf.constant(7.))
-      face_mask_reconstruction_loss = w_face_mask * reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., tf.constant(2.5))
+      landmark_reconstruction_loss = w_landmarks *  reconstruction_loss(icr_landmarks, (tbatch_landmarks + 1.) / 2., (landmark_factor))
+      face_mask_reconstruction_loss = w_face_mask * reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., (mask_factor))
       face_part_reconstruction_loss = w_face_part * l1_reconstruction_loss(icr_face_part, tbatch_face_part)
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
-
-      zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
-
-      # Embedding consistency loss
-      # _, zemb_no_mask, landmarks_no_mask, mask_no_mask, part_no_mask = feature_embedding(tbatch_original, extractor_sample, zero_mask, training=False)
-      # consistency_embedding_loss = l1_loss_dim1(z_emb, zemb_no_mask)
       
       # Embedding kl loss
       z1_kl_loss = b_kl * kl_divergence_loss(zlr_mu, zlr_log_var)
       z2_kl_loss = b_kl *  kl_divergence_loss(zfr_mu, zfr_log_var)
 
       total_embedding_loss = embedding_reconstruction_loss + z1_kl_loss + z2_kl_loss + total_extractor_loss + zf_loss
-
-      # Generator loss
-
-      # gan_reconstruction_loss = tf.reduce_mean(l1_reconstruction_loss(icr, tbatch_original))
-      gan_reconstruction_loss = rec_loss * masked_loss(tbatch_original, icr, lbatch_mask)
-
-      # Consistency Loss
-      _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr, extractor_sample, zero_mask, training=False)
-      icr_landmark_loss = l1_reconstruction_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks))
-      icr_face_mask_loss = l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
-      icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
-
-      # icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
-      icr_consistency_loss = icr_landmark_loss
-
-      # Discriminator loss
-
-      # TODO: check if using tanh for discriminator is ok
-
-      icr_combined = (icr * lbatch_mask) + (tbatch_original * (1. - lbatch_mask))
-
-      real_output =  discriminator(tbatch_original, training=True)  
-      fake_output =  discriminator(icr_combined, training=True)
-
-      # Local discriminator loss
-      masked_batch_original = tbatch_original * (lbatch_mask)
-      masked_generated_images = icr * (lbatch_mask)
-
-      local_real_output = local_discriminator([masked_batch_original, one_channel_mask], training=True)  
-      local_fake_output = local_discriminator([masked_generated_images, one_channel_mask], training=True)
-
-      global_discriminator_loss = adversarial_loss * discriminator_loss(real_output, fake_output)
-      local_discriminator_loss = discriminator_loss(local_real_output, local_fake_output)
-
-      local_generator_loss = adversarial_loss * generator_loss(local_fake_output)
-      global_generator_loss = adversarial_loss * generator_loss(fake_output)
-
-      total_generator_loss = gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss
 
     face_embedding_trainable_variables = (
       extractor.trainable_variables + 
@@ -329,29 +281,19 @@ def train_step(batch, lbatch_mask):
     gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
     face_embedding_optimizer.apply_gradients(zip(gradients_of_embedding, face_embedding_trainable_variables))
 
-    gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
-    generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
-
-    gradients_of_global_discriminator = global_disc_tape.gradient(global_discriminator_loss, discriminator.trainable_variables)
-    global_discriminator_optimizer.apply_gradients(zip(gradients_of_global_discriminator, discriminator.trainable_variables))
-
-    gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
-    local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
-
     return {
       "outputs": {
         "original_images": tbatch_original,
-        "reconstructed_images": icr,
+        "landmark_original": tbatch_landmarks,
+        "face_mask_original": tbatch_face_mask,
+        "face_part_original": tbatch_face_part,
         "landmark_reconstructed": icr_landmarks,
         "face_mask_reconstructed": icr_face_mask,
         "face_part_reconstructed": icr_face_part,
       },
       "losses": {	
-        "total/total_generator_loss": total_generator_loss,
         "total/total_embedding_loss": total_embedding_loss,
         "total/total_extractor_loss": total_extractor_loss,
-        "total/global_disc_loss": global_discriminator_loss,
-        "total/local_disc_loss": local_discriminator_loss,
         "extractor/kl_loss": (extractor_kl_loss),
         "extractor/consistency_loss": extractor_consistency_loss,
         "embedding/landmark_reconstruction_loss": (landmark_reconstruction_loss),
@@ -359,25 +301,6 @@ def train_step(batch, lbatch_mask):
         "embedding/face_part_reconstruction_loss": (face_part_reconstruction_loss),
         "embedding/z1_kl_loss": (z1_kl_loss),
         "embedding/z2_kl_loss": (z2_kl_loss),
-        # "embedding/consistency_loss": (consistency_embedding_loss),
-        "generator/reconstruction_loss": (gan_reconstruction_loss),
-        "generator/landmarks_consistency_loss": (icr_landmark_loss),
-        # "generator/face_mask_consistency_loss": (icr_face_mask_loss),
-        # "generator/face_part_consistency_loss": (icr_face_part_loss),
-        "generator/local_loss": (local_generator_loss),
-        "generator/global_loss": (global_generator_loss),
-        # "extractor_reconstruction_loss": tf.reduce_mean(extractor_reconstruction_loss),
-        # "extractor_kl_loss": tf.reduce_mean(extractor_kl_loss),
-        # "landmark_reconstruction_loss": tf.reduce_mean(landmark_loss),
-        # "face_mask_reconstruction_loss": tf.reduce_mean(face_mask_loss),
-        # "face_part_reconstruction_loss": tf.reduce_mean(face_part_loss),
-        # "landkmark_kl_loss": tf.reduce_mean(landmark_kl_loss),
-        # "face_mask_kl_loss": tf.reduce_mean(face_mask_kl_loss),
-        # "landmark_consistency_loss": (landmark_consistency_loss),
-        # "face_consistency_loss": (face_consistency_loss),
-        # "consistency_loss": consistency_loss,
-        # "/extractor/kl_loss": (extractor_kl_loss),
-        # "/extractor/l1_loss": (extractor_l1_loss),
       }
     }
 
@@ -426,10 +349,10 @@ def train(dataset, epochs):
                                 batch_mask = mask_batch[:,:,:,0:1])
         # predictions = (predictions[i] * args[2][i]) + (args[1][i] * (1. - args[2][i]))
         checkpoint.save(file_prefix = checkpoint_prefix)
-        generate_and_save_images(predictions = predictions,
-                                 original=sample,
-                                 mask=mask_batch,
-                                 step = total_steps + 1)
+        # generate_and_save_images(predictions = predictions,
+        #                          original=sample,
+        #                          mask=mask_batch,
+        #                          step = total_steps + 1)
         # Slep 4 minutes
         # time.sleep(240)
         if config["utils"]["show_embedding"]:
@@ -439,48 +362,62 @@ def train(dataset, epochs):
           landmark_sample = outputs["landmark_reconstructed"][0]
           mask_sample = outputs["face_mask_reconstructed"][0]
           face_part_sample = outputs["face_part_reconstructed"][0]
-          reconstructed_image = outputs["reconstructed_images"][0]
-          mask = batch_of_masks[0]
-          fig = plt.figure(figsize=(8, 6))
 
-          # Subplot 1: Landmark sample
-          plt.subplot(2, 3, 1)
-          plt.imshow(tf.sigmoid(landmark_sample), cmap='gray')
-          plt.title("Landmark")
-          plt.axis('off')
+          landmark_original = outputs["landmark_original"][0]
+          face_mask_original = outputs["face_mask_original"][0]
+          face_part_original = outputs["face_part_original"][0]
 
-          # Subplot 2: Mask sample
-          plt.subplot(2, 3, 2)
-          plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
-          plt.title("Mask")
-          plt.axis('off')
+          # shift from -1 to 1
+          original_image = (original_image + 1.) / 2.
+          landmark_sample = tf.sigmoid(landmark_sample)
+          mask_sample = tf.sigmoid(mask_sample)
+          face_part_sample = (face_part_sample + 1.) / 2.
 
-          # Subplot 3: Face part sample
-          plt.subplot(2, 3, 3)
-          plt.imshow((face_part_sample + 1.) / 2.)
-          plt.title("Face Part")
-          plt.axis('off')
+          # shift original from -1 to 1
+          landmark_original = (landmark_original + 1.) / 2.
+          face_mask_original = (face_mask_original + 1.) / 2.
+          face_part_original = (face_part_original + 1.) / 2.
 
-          # Subplot 4: Original image
-          plt.subplot(2, 3, 4)
-          plt.imshow((original_image + 1.) / 2.)
-          plt.title("Original")
-          plt.axis('off')
+          # Plot vs for landmarks, masks and parts
 
-          # Subplot 5: Reconstructed image
-          plt.subplot(2, 3, 5)
-          plt.imshow((reconstructed_image + 1.) / 2.)
-          plt.title("Reconstructed")
-          plt.axis('off')
+          # Crear el gráfico con varias subgráficas
+          fig, axes = plt.subplots(3, 3, figsize=(12, 12))
 
-          # Subplot 6: Mask
-          plt.subplot(2, 3, 6)
-          plt.imshow(mask, cmap='gray')
-          plt.title("Random Mask")
-          plt.axis('off')
+          # Títulos para cada subgráfico
+          titles = [
+              "Original Image", "Landmark Sample", "Mask Sample",
+              "Face Part Sample", "Landmark Original", "Face Mask Original",
+              "Face Part Original", "Landmark vs Sample", "Sample vs Mask"
+          ]
 
-          plt.show()
-          plt.close()
+          # Muestra las imágenes
+          axes[0, 0].imshow(original_image)
+          axes[0, 0].set_title(titles[0])
+          axes[0, 1].imshow(landmark_sample, cmap='gray')
+          axes[0, 1].set_title(titles[1])
+          axes[0, 2].imshow(mask_sample, cmap='gray')
+          axes[0, 2].set_title(titles[2])
+
+          axes[1, 0].imshow(face_part_sample)
+          axes[1, 0].set_title(titles[3])
+          axes[1, 1].imshow(landmark_original, cmap='gray')
+          axes[1, 1].set_title(titles[4])
+          axes[1, 2].imshow(face_mask_original, cmap='gray')
+          axes[1, 2].set_title(titles[5])
+
+          axes[2, 0].imshow(face_part_original)
+          axes[2, 0].set_title(titles[6])
+
+          # Genera comparaciones entre las imágenes
+          axes[2, 1].imshow(landmark_sample - landmark_original, cmap='hot')
+          axes[2, 1].set_title(titles[7])
+
+          axes[2, 2].imshow(mask_sample - face_mask_original, cmap='hot')
+          axes[2, 2].set_title(titles[8])
+
+          # Ajusta el espacio entre las subgráficas
+          plt.tight_layout()
+          plt.savefig('res/embedding_at_step_{:04d}.png'.format(total_steps))
 
 
 
