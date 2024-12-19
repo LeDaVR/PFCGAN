@@ -38,6 +38,7 @@ w_landmarks = 0.3
 w_face_mask = 0.2
 w_face_part = 0.5
 b_kl = 0.2
+kl_embedding = 0.1
 consistency_loss = 0.2
 adversarial_loss = 2
 rec_loss = 0.2
@@ -264,8 +265,8 @@ def train_step(batch, lbatch_mask):
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
       
       # Embedding kl loss
-      z1_kl_loss = b_kl * kl_divergence_loss(zlr_mu, zlr_log_var)
-      z2_kl_loss = b_kl *  kl_divergence_loss(zfr_mu, zfr_log_var)
+      z1_kl_loss = kl_embedding * kl_divergence_loss(zlr_mu, zlr_log_var)
+      z2_kl_loss = kl_embedding *  kl_divergence_loss(zfr_mu, zfr_log_var)
 
       total_embedding_loss = embedding_reconstruction_loss + z1_kl_loss + z2_kl_loss + total_extractor_loss + zf_loss
 

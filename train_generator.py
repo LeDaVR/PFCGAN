@@ -222,6 +222,11 @@ def train_step(batch, lbatch_mask):
       one_channel_mask = lbatch_mask[:,:,:,0:1]
 
       # Extractor 
+      z_random = tf.random.normal(shape = [batch_size, noise_dim])
+      _, f_emb, f_landmarks, f_mask, f_face_part  = feature_embedding(tbatch_original_incomplete, z_random , one_channel_mask, training=False)
+      icf = generator([f_emb, tbatch_original_incomplete, one_channel_mask], training=True)
+
+      f_rec_loss = rec_loss * masked_loss(tbatch_original, icf, 1-lbatch_mask)
 
       # Face Embedding
       e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=False)
@@ -239,7 +244,7 @@ def train_step(batch, lbatch_mask):
       icr_face_mask = face_mask_decoder(z_emb, training=False)
       icr_face_part = face_part_decoder(z_emb, training=False)
 
-      icr = generator([z_emb, tbatch_original_incomplete, lbatch_mask[:,:,:,0:1]], training=True)
+      icr = generator([z_emb, tbatch_original_incomplete, one_channel_mask], training=True)
 
       zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
       # Generator loss
@@ -278,7 +283,10 @@ def train_step(batch, lbatch_mask):
       local_generator_loss = adversarial_loss * generator_loss(local_fake_output)
       global_generator_loss = adversarial_loss * generator_loss(fake_output)
 
-      total_generator_loss = gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss
+      total_generator_loss = (
+        gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss +
+        f_rec_loss
+      )
 
     gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
     generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
