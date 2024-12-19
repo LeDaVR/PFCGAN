@@ -38,9 +38,9 @@ w_landmarks = 0.3
 w_face_mask = 0.2
 w_face_part = 0.5
 b_kl = 0.2
-consistency_loss = 0.2
-adversarial_loss = 2
-rec_loss = 0.2
+consistency_loss = 0.1
+adversarial_loss = 20
+rec_loss = 0.1
 
 
 
@@ -248,12 +248,12 @@ def train_step(batch, lbatch_mask):
 
       # Consistency Loss
       _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr, extractor_sample, zero_mask, training=False)
-      icr_landmark_loss = l1_reconstruction_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks))
-      icr_face_mask_loss = l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
+      icr_landmark_loss = w_landmarks * l1_reconstruction_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks))
+      icr_face_mask_loss = w_face_mask * l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
       icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
 
       # icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
-      icr_consistency_loss = icr_landmark_loss
+      icr_consistency_loss = icr_landmark_loss + icr_face_mask_loss 
 
       # Discriminator loss
 
@@ -302,6 +302,7 @@ def train_step(batch, lbatch_mask):
         "total/local_disc_loss": local_discriminator_loss,
         "generator/reconstruction_loss": (gan_reconstruction_loss),
         "generator/landmarks_consistency_loss": (icr_landmark_loss),
+        "generator/mask_consistency_loss": (icr_face_mask_loss),
         "generator/local_loss": (local_generator_loss),
         "generator/global_loss": (global_generator_loss),
       }
