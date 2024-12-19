@@ -32,7 +32,6 @@ class PFCGAN():
 # Load the model
 
 generator = make_generator_model()
-generator.trainable = False
 landmark_encoder = make_landmark_encoder()
 landmark_decoder = make_landmark_decoder()
 face_encoder = make_face_encoder()
@@ -53,7 +52,7 @@ checkpoint = tf.train.Checkpoint(
                                  face_mask_decoder=face_mask_decoder,
                                  face_part_decoder=face_part_decoder,
                                  )
-checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
+checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir)).expect_partial()
 
 
 def evaluate_metrics(original_images, generated_images):
