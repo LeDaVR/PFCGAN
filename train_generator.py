@@ -40,7 +40,7 @@ w_face_part = 0.5
 b_kl = 0.2
 consistency_loss = 0.1
 adversarial_loss = 20
-rec_loss = 0.1
+rec_loss = 0.02
 
 
 
@@ -113,7 +113,7 @@ def masked_loss(y_true, y_pred, mask):
    l1 = (tf.abs(y_true - y_pred))
    masked_l1 = l1 * mask
    total_img_error = tf.reduce_sum(masked_l1, axis=[1,2,3])
-   num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])  
+  #  num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])  
   #  normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
    return tf.reduce_mean(total_img_error)
 
@@ -250,7 +250,7 @@ def train_step(batch, lbatch_mask):
       _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr, extractor_sample, zero_mask, training=False)
       icr_landmark_loss = w_landmarks * l1_reconstruction_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks))
       icr_face_mask_loss = w_face_mask * l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
-      icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
+      # icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
 
       # icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
       icr_consistency_loss = icr_landmark_loss + icr_face_mask_loss 
@@ -272,7 +272,7 @@ def train_step(batch, lbatch_mask):
       local_fake_output = local_discriminator([masked_generated_images, one_channel_mask], training=True)
 
       global_discriminator_loss = adversarial_loss * discriminator_loss(real_output, fake_output)
-      local_discriminator_loss = discriminator_loss(local_real_output, local_fake_output)
+      local_discriminator_loss = adversarial_loss * discriminator_loss(local_real_output, local_fake_output)
 
       local_generator_loss = adversarial_loss * generator_loss(local_fake_output)
       global_generator_loss = adversarial_loss * generator_loss(fake_output)
