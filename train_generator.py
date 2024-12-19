@@ -248,8 +248,8 @@ def train_step(batch, lbatch_mask):
 
       # Consistency Loss
       _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr, extractor_sample, zero_mask, training=False)
-      icr_landmark_loss = w_landmarks * l1_reconstruction_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks))
-      icr_face_mask_loss = w_face_mask * l1_reconstruction_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask))
+      icr_landmark_loss = w_landmarks * masked_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks), lbatch_mask)
+      icr_face_mask_loss = w_face_mask * masked_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask), lbatch_mask)
       # icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
 
       # icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
