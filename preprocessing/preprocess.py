@@ -17,7 +17,6 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-import dlib
 
 def create_mask_from_landmarks(image_shape, normalized_landmarks):
     """
@@ -330,98 +329,6 @@ def process_mediapipe_image(img, output_folder):
     cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_face_part.jpg"), cv2.cvtColor(face_part, cv2.COLOR_RGB2BGR))
     
     return img, True
-
-
-def process_image(f, predictor, detector, output_folder):
-    img = dlib.load_rgb_image(f)
-    img = crop(img)
-    img = cv2.resize(img, (128, 128))
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-
-
-    # Detectar caras en la imagen
-    dets = detector(img, 2)
-
-    if len(dets) == 0:
-        return f, None
-
-    for k, d in enumerate(dets):
-        shape = predictor(img, d)
-        landmarks = np.array([(p.x, p.y) for p in shape.parts()])
-
-        landmark_img = np.zeros(img.shape, dtype=np.uint8)
-        # Dibuja los landmarks
-        for i in range(0, 16):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part(i+1).x, shape.part(i+1).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Right eyebrow
-        for i in range(17, 21):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part(i+1).x, shape.part(i+1).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Left eyebrow
-        for i in range(22, 26):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part(i+1).x, shape.part(i+1).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Nose bridge
-        for i in range(27, 30):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part(i+1).x, shape.part(i+1).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Nose bottom
-        for i in range(30, 35):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part(i+1).x, shape.part(i+1).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Right eye
-        for i in range(36, 41):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part((i+1) % 42).x, shape.part((i+1) % 42).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Left eye
-        for i in range(42, 47):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part((i+1) % 48).x, shape.part((i+1) % 48).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Outer lip
-        for i in range(48, 59):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part((i+1) % 60).x, shape.part((i+1) % 60).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-        
-        # Inner lip
-        for i in range(60, 67):
-            pt1 = (shape.part(i).x, shape.part(i).y)
-            pt2 = (shape.part((i+1) % 68).x, shape.part((i+1) % 68).y)
-            cv2.line(landmark_img, pt1, pt2, (255, 255, 255), 1)
-
-        # Máscara y extracción de la parte de la cara
-        hull = cv2.convexHull(landmarks)
-        mask = np.zeros_like(img_gray)
-        cv2.fillConvexPoly(mask, hull, 255)
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.dilate(mask, kernel, iterations=1)
-        face_part_img = cv2.bitwise_and(img_rgb, img_rgb, mask=mask)
-
-        # Guardar las imágenes procesadas
-        name = f.split('\\')[-1].split(".")[0]
-        cv2.imwrite(os.path.join(output_folder, "original", f"{name}.jpg"), img_rgb)
-        cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_landmarks.jpg"), landmark_img)
-        cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_mask.jpg"), mask)
-        cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_face_part.jpg"), face_part_img)
-
-    return f, True
 
 # Función principal para manejar el procesamiento en paralelo
 def main():
