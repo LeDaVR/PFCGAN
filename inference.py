@@ -82,6 +82,7 @@ def reparametrize(z_mean, z_log_sigma):
 
 # Run inference with 4 random z for each image
 def generate_and_save_images(predictions, original, mask, step, show=False):
+    print(tf.shape(predictions))
 
     fig = plt.figure(figsize=(10, 10))
 
@@ -96,6 +97,31 @@ def generate_and_save_images(predictions, original, mask, step, show=False):
         plt.show()
     plt.close()
 
+def show_embedding(landmarks, mask, face_part ):
+    fig = plt.figure(figsize=(10, 10))
+
+    # Four Images, plot 3 images for each one (12 images total)
+    for i in range(4):
+        plt.subplot(4, 3, (i * 3) + 1)
+        plt.imshow(tf.sigmoid(landmarks[i]), cmap='gray')
+        plt.axis('off')
+        plt.title("Landmarks")
+        plt.subplot(4, 3, (i * 3) + 2)
+        plt.imshow(tf.sigmoid(mask[i]), cmap='gray')
+        plt.axis('off')
+        plt.title("Mask")
+        plt.subplot(4, 3, (i * 3) + 3)
+        plt.imshow((face_part[i] + 1.) /2.)
+        plt.axis('off')
+        plt.title("Face Part")
+
+
+        
+
+    plt.show()
+    plt.close()
+
+
 def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, batch_incomplete, batch_mask):
     l_mu, l_log_var = lencoder([batch_incomplete, z, batch_mask], training=False)
     reparametrized_landmarks = reparametrize(l_mu, l_log_var)
@@ -103,7 +129,10 @@ def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, ba
     reparametrized_face= reparametrize(f_mu, f_log_var)
     emb = tf.concat([reparametrized_landmarks, reparametrized_face], axis=-1)
     fake = generator([emb, batch_incomplete, batch_mask], training=False)
-    return fake
+    landmarks = ldecoder(reparametrized_landmarks, training=False)
+    mask = mdecoder(emb, training=False)
+    face_part = fdecoder(emb, training=False)
+    return fake, landmarks, mask, face_part
 
 for batch in train_dataset:
     num_examples_to_generate = 4
@@ -134,7 +163,7 @@ for batch in train_dataset:
         plt.close()
 
 
-        predictions = inference(pfcGan.landmark_encoder, 
+        predictions, landmraks, masks, face_parts = inference(pfcGan.landmark_encoder,
                                 pfcGan.landmark_decoder, 
                                 pfcGan.face_encoder, 
                                 pfcGan.face_mask_decoder, 
@@ -144,6 +173,7 @@ for batch in train_dataset:
                                 batch_incomplete = samples,
                                 batch_mask = mask_batch[:,:,:,0:1])
         generate_and_save_images(predictions, samples, mask_batch, step, show=True)
+        show_embedding(landmraks, masks, face_parts)
         print(evaluate_metrics(tf.stack([item, item , item, item]), predictions))
         print("Inference done for z={}".format(step))
 

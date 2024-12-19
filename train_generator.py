@@ -40,7 +40,7 @@ w_face_part = 0.5
 b_kl = 0.2
 consistency_loss = 0.1
 adversarial_loss = 20
-rec_loss = 0.02
+rec_loss = 0.9
 
 
 
@@ -246,8 +246,10 @@ def train_step(batch, lbatch_mask):
       # gan_reconstruction_loss = tf.reduce_mean(l1_reconstruction_loss(icr, tbatch_original))
       gan_reconstruction_loss = rec_loss * masked_loss(tbatch_original, icr, lbatch_mask)
 
+      icr_combined = (icr * lbatch_mask) + (tbatch_original * (1. - lbatch_mask))
+
       # Consistency Loss
-      _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr, extractor_sample, zero_mask, training=False)
+      _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr_combined, extractor_sample, zero_mask, training=False)
       icr_landmark_loss = w_landmarks * masked_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks), lbatch_mask)
       icr_face_mask_loss = w_face_mask * masked_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask), lbatch_mask)
       # icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
@@ -259,7 +261,6 @@ def train_step(batch, lbatch_mask):
 
       # TODO: check if using tanh for discriminator is ok
 
-      icr_combined = (icr * lbatch_mask) + (tbatch_original * (1. - lbatch_mask))
 
       real_output =  discriminator(tbatch_original, training=True)  
       fake_output =  discriminator(icr_combined, training=True)
