@@ -1,21 +1,19 @@
-import sys
-import concurrent.futures
 import os
-import cv2
+import concurrent.futures
 import numpy as np
 import glob
 from tqdm import tqdm
 
 import argparse
-import os
 
+import mediapipe as mp
 from mediapipe import solutions
 from mediapipe.python.solutions.drawing_utils import DrawingSpec, WHITE_COLOR
 from mediapipe.framework.formats import landmark_pb2
 
-import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+import cv2
 
 
 def create_mask_from_landmarks(image_shape, normalized_landmarks):
