@@ -338,11 +338,32 @@ def main():
     # Crear lista de imágenes a procesar
     image_files = glob.glob(os.path.join(args.folder, "*.jpg"))
 
+    with open(args.progress_file, 'r') as save:
+        last_image = save.read().strip()
+
+    print(f"Continuando desde la imagen: {last_image}")
+    # Asegurarse de que el archivo específico esté en la lista
+    if last_image in image_files:
+        # Encontrar el índice del archivo específico
+        start_index = image_files.index(last_image)
+        # Incluir solo los archivos posteriores
+        filtered_files = image_files[start_index:]
+    else:
+        # Si el archivo específico no está en la lista, devolver todos
+        filtered_files = image_files
+    
+    image_files = filtered_files
+
+    # crop the glob to images after the last image
+
+
     with concurrent.futures.ThreadPoolExecutor() as executor:
         # Crear barra de progreso
         with tqdm(total=len(image_files), desc="Procesando imágenes", unit="imagen") as pbar:
             # Enviar tareas al executor
             # futures = {executor.submit(process_image, f, predictor, detector, args.output_folder): f for f in image_files}
+
+            # execute only for the images after the last image
             futures = {executor.submit(process_mediapipe_image, f, args.output_folder): f for f in image_files}
             
             # Manejar resultados conforme se completan las tareas
