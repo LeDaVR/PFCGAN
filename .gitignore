@@ -11,3 +11,4 @@ __pycache__/*
 /old/*
 /logs/*
 config.yaml
+/data/*
