@@ -37,7 +37,7 @@ batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 0.3
 w_face_mask = 0.2
 w_face_part = 0.5
-b_kl = 0.2
+b_kl = 0.05
 kl_embedding = 0.1
 consistency_loss = 0.2
 adversarial_loss = 2
@@ -419,6 +419,7 @@ def train(dataset, epochs):
           # Ajusta el espacio entre las subgráficas
           plt.tight_layout()
           plt.savefig('res/embedding_at_step_{:04d}.png'.format(total_steps))
+          plt.close()
 
 
 
