@@ -338,21 +338,23 @@ def main():
     # Crear lista de imágenes a procesar
     image_files = glob.glob(os.path.join(args.folder, "*.jpg"))
 
-    with open(args.progress_file, 'r') as save:
-        last_image = save.read().strip()
 
-    print(f"Continuando desde la imagen: {last_image}")
-    # Asegurarse de que el archivo específico esté en la lista
-    if last_image in image_files:
-        # Encontrar el índice del archivo específico
-        start_index = image_files.index(last_image)
-        # Incluir solo los archivos posteriores
-        filtered_files = image_files[start_index:]
-    else:
-        # Si el archivo específico no está en la lista, devolver todos
-        filtered_files = image_files
+    if os.path.exists(args.progress_file):
+        with open(args.progress_file, 'r') as save:
+            last_image = save.read().strip()
+
+        print(f"Continuando desde la imagen: {last_image}")
+        # Asegurarse de que el archivo específico esté en la lista
+        if last_image in image_files:
+            # Encontrar el índice del archivo específico
+            start_index = image_files.index(last_image)
+            # Incluir solo los archivos posteriores
+            filtered_files = image_files[start_index:]
+        else:
+            # Si el archivo específico no está en la lista, devolver todos
+            filtered_files = image_files
     
-    image_files = filtered_files
+        image_files = filtered_files
 
     # crop the glob to images after the last image
 

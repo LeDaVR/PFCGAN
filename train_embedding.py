@@ -280,7 +280,8 @@ def train_step(batch, lbatch_mask):
     )
 
     gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
-    face_embedding_optimizer.apply_gradients(zip(gradients_of_embedding, face_embedding_trainable_variables))
+    clipped_gradients = [tf.clip_by_norm(g, 1.0) for g in gradients_of_embedding]
+    face_embedding_optimizer.apply_gradients(zip(clipped_gradients, face_embedding_trainable_variables))
 
     return {
       "outputs": {
