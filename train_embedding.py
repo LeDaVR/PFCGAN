@@ -40,8 +40,6 @@ w_face_part = 0.5
 b_kl = 0.05
 kl_embedding = 0.1
 consistency_loss = 0.2
-adversarial_loss = 2
-rec_loss = 0.2
 landmark_factor = 6
 mask_factor = 2.5
 

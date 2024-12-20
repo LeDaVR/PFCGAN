@@ -37,7 +37,6 @@ batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 0.3
 w_face_mask = 0.2
 w_face_part = 0.5
-b_kl = 0.2
 consistency_loss = 0.1
 adversarial_loss = 20
 rec_loss = 0.9

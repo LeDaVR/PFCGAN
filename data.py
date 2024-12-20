@@ -7,8 +7,8 @@ def parse_test_image(original_img_path, target_size = (128, 128)):
     # Cargar imagen original (RGB)
     original_img = tf.io.read_file(original_img_path_str)
     original_img = tf.image.decode_jpeg(original_img, channels=3)
-    original_img = tf.image.resize(original_img, (128, 128))
-    original_img = (original_img / 255) -1.
+    original_img = tf.image.resize(original_img, target_size)
+    original_img = (tf.cast(original_img, tf.float32) / 127.5) -1.
 
     print(tf.shape(original_img))
     return  original_img
@@ -24,8 +24,8 @@ def parse_image_set(original_img_path, feature_img_dir, target_size = (128, 128)
     # Cargar imagen original (RGB)
     original_img = tf.io.read_file(original_img_path_str)
     original_img = tf.image.decode_jpeg(original_img, channels=3)
-    original_img = tf.image.resize(original_img, (128, 128))
-    original_img = (original_img / 127.5) -1.
+    original_img = tf.image.resize(original_img, target_size)
+    original_img = (tf.cast(original_img, tf.float32) / 127.5) -1.
 
     feature_names = [('landmarks', 1), ('mask', 1), ('face_part', 3)]
     feature_imgs = []
@@ -35,7 +35,7 @@ def parse_image_set(original_img_path, feature_img_dir, target_size = (128, 128)
         feature_img = tf.io.read_file(feature_path)
         feature_img = tf.image.decode_jpeg(feature_img, channels=channels)
         feature_img = tf.image.resize(feature_img, target_size)
-        feature_img = (feature_img / 127.5) -1.
+        feature_img = (tf.cast(feature_img, tf.float32) / 127.5) -1.
         feature_imgs.append(feature_img)
     
     # Concatenar las imágenes
