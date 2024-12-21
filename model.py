@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras import layers
 from utils import mask_rgb
+import numpy as np
 
 ## Create the models
 
@@ -88,27 +89,28 @@ def make_landmark_encoder():
     incomplete = layers.Input(shape=(128,128,3))
     z = layers.Input(shape=(z_dim,))
 
-
-    z_dense = layers.Dense(4096)(z)
-    z1 = layers.Reshape((64, 64, 1))(z_dense)
-    z2 = layers.Reshape((32, 32, -1))(z1)
-    z3 = layers.Reshape((16, 16, -1))(z2)
-    z4 = layers.Reshape((8, 8, -1))(z3)
-    z5 = layers.Reshape((4, 4, -1))(z4)
+    # z_dense = layers.Dense(4096)(z)
+    # z1 = layers.Reshape((64, 64, 1))(z_dense)
+    # z2 = layers.Reshape((32, 32, -1))(z1)
+    # z3 = layers.Reshape((16, 16, -1))(z2)
+    # z4 = layers.Reshape((8, 8, -1))(z3)
+    # z5 = layers.Reshape((4, 4, -1))(z4)
 
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z1])
+    # x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z2])
+    # x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z3])
+    # x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z4])
+    # x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z5])
+    # x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
+    x = layers.Concatenate(axis=-1)([x, z])
+    x = layers.Dense(512)(x)
 
     out_dim = 256
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
@@ -129,27 +131,29 @@ def make_face_encoder():
     z = layers.Input(shape=(z_dim,))
 
 
-    z_dense = layers.Dense(4096)(z)
-    z1 = layers.Reshape((64, 64, 1))(z_dense)
-    z2 = layers.Reshape((32, 32, -1))(z1)
-    z3 = layers.Reshape((16, 16, -1))(z2)
-    z4 = layers.Reshape((8, 8, -1))(z3)
-    z5 = layers.Reshape((4, 4, -1))(z4)
+    # z_dense = layers.Dense(4096)(z)
+    # z1 = layers.Reshape((64, 64, 1))(z_dense)
+    # z2 = layers.Reshape((32, 32, -1))(z1)
+    # z3 = layers.Reshape((16, 16, -1))(z2)
+    # z4 = layers.Reshape((8, 8, -1))(z3)
+    # z5 = layers.Reshape((4, 4, -1))(z4)
 
     # concatenate incomplete and mask
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z1])
+    # x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z2])
+    # x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z3])
+    # x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z4])
+    # x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    x = layers.Concatenate(axis=-1)([x, z5])
+    # x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
+    x = layers.Concatenate(axis=-1)([x, z])
+    x = layers.Dense(512)(x)
 
     out_dim = 256
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
@@ -227,3 +231,21 @@ def make_local_discriminator():
     model = tf.keras.Model(inputs=[input_image, mask], outputs=x, name="local_discriminator")
 
     return model
+
+class CyclicalAnnealingScheduler:
+    def __init__(self, cycle_length, max_beta=1.0, min_beta=0.0, n_cycles=4):
+        self.cycle_length = cycle_length
+        self.max_beta = max_beta
+        self.min_beta = min_beta
+        self.n_cycles = n_cycles
+        
+    def get_beta(self, epoch):
+        """Calcula el valor beta para el epoch actual"""
+        # Determinar el ciclo actual
+        cycle = (epoch % self.cycle_length) / self.cycle_length
+        
+        # Calcular el valor beta usando una función suave
+        beta = self.min_beta + (self.max_beta - self.min_beta) * \
+               (1 / (1 + np.exp(-12 * (cycle - 0.5))))
+        
+        return tf.cast(beta, dtype=tf.float32)

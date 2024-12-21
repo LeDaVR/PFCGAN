@@ -1,20 +1,17 @@
 ### Setup
 import tensorflow as tf
-from tensorflow.keras import layers
 
 import matplotlib.pyplot as plt
-import numpy as np
 import os
-import PIL
 import time
 from datetime import datetime
 
 from IPython import display
 
-from data import create_image_dataset
+from data import MultiChannelDataLoader
 from model import make_extractor_model, make_generator_model, make_discriminator_model, \
     make_landmark_encoder, make_landmark_decoder, \
-    make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator
+    make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator, CyclicalAnnealingScheduler
 from utils import generate_and_save_images, mask_rgb
 
 import yaml
@@ -26,26 +23,26 @@ with open("config.yaml", "r") as file:
 # Acceso a las rutas y configuraciones
 original_img_dir = config["paths"]["original_img_dir"]
 feature_img_dir = config["paths"]["feature_img_dir"]
-
-# tf.config.run_functions_eagerly(True)
-
 ### Load and prepare the dataset
 
 # Hyperparameters
 EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
-w_landmarks = 0.3
-w_face_mask = 0.2
-w_face_part = 0.5
-b_kl = 0.05
-kl_embedding = 0.1
-consistency_loss = 0.2
-landmark_factor = 6
-mask_factor = 2.5
+w_landmarks = 2000
+w_face_mask = 4000
+w_face_part = 4000
+# f_kl = 0.2
+# kl_embedding = 0.5
+# e_kl = 1.
+consistency_loss = 100.
+landmark_factor = 1.
+mask_factor = 1.
+annealing_steps = 2000
+max_beta = .5
 
-
-
-train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
+# train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
+data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128, 128))
+train_dataset = data_loader.create_dataset(batch_size=batch_size)
 print(train_dataset)
 
 generator = make_generator_model()
@@ -71,6 +68,8 @@ pfcGan = PFCGAN(landmark_encoder, landmark_decoder, face_encoder, face_mask_deco
 
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
+scheduler = CyclicalAnnealingScheduler(cycle_length=annealing_steps, max_beta=max_beta, min_beta=0.0, n_cycles=4)
+
 ### Discriminator loss
 
 def discriminator_loss(real_output, fake_output):
@@ -93,7 +92,7 @@ def reparametrize(z_mean, z_log_sigma):
   return eps * tf.exp(z_log_sigma * .5) + z_mean
 
 def l1_reconstruction_loss(x, y_true):
-  l1 = tf.reduce_sum(tf.abs(y_true - x), axis = [1,2,3])
+  l1 = tf.reduce_mean(tf.abs(y_true - x), axis = [1,2,3])
   return tf.reduce_mean(l1)
 
 def reconstruction_loss(x_logit, y_true, weight=tf.constant(7.)):
@@ -102,7 +101,7 @@ def reconstruction_loss(x_logit, y_true, weight=tf.constant(7.)):
         labels=y_true, 
         pos_weight=weight
     )
-    imgs_loss = tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+    imgs_loss = tf.reduce_mean(cross_ent, axis=[1, 2, 3])
     return tf.reduce_mean(imgs_loss)
 
 def kl_divergence_loss(mean, logvar):
@@ -115,26 +114,16 @@ def masked_loss(y_true, y_pred, mask):
    masked_l1 = l1 * mask
    total_img_error = tf.reduce_sum(masked_l1, axis=[1,2,3])
    num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])  
-  #  normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
-   return tf.reduce_mean(total_img_error)
+   normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
+   return tf.reduce_mean(normalized_img_error)
 
 def masked_weighted_cross_entropy_loss(x_logits, y_true, mask, weight=tf.constant(7.)):
     cross_entropy_loss = tf.nn.weighted_cross_entropy_with_logits(logits=x_logits, labels=y_true, pos_weight=weight)
     masked_cross_entropy_loss = cross_entropy_loss * mask
     total_img_error = tf.reduce_sum(masked_cross_entropy_loss, axis=[1,2,3])
-    # num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])
-    # normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
-    return tf.reduce_mean(total_img_error)
-
-# def compute_loss(model, x, y_true):
-#     mean, logvar = model.encode(x)
-#     z = model.reparameterize(mean, logvar)
-#     x_logit = model.decode(z)
-#
-#     recon_loss = reconstruction_loss(x, x_logit, y_true)
-#     kl_loss = kl_divergence_loss(z, mean, logvar)
-#
-#     return x_logit, -tf.reduce_mean(recon_loss + kl_loss)
+    num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])
+    normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
+    return tf.reduce_mean(normalized_img_error)
 
 generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 global_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
@@ -142,9 +131,7 @@ local_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 face_embedding_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 # extractor_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 
- 
 ### Save checkpoints
-
 checkpoint_dir = './training_checkpoints'
 checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(
@@ -166,7 +153,6 @@ checkpoint = tf.train.Checkpoint(
                                  )
 
 ## Define the training loop
-
 def feature_embedding(x, z_extractor, mask, training=True):
   # Landkard encoder
   zl_mu, zl_log_var  = landmark_encoder([x, z_extractor, mask], training=training)
@@ -182,15 +168,14 @@ def feature_embedding(x, z_extractor, mask, training=True):
 
   return (landmark_sample, face_sample), z_emb, landmark_reconstructed, face_mask_reconstructed, face_part_reconstructed
 
-
-def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, batch_incomplete, batch_mask):
-    l_mu, l_log_var = lencoder([batch_incomplete, z, batch_mask], training=False)
-    reparametrized_landmarks = reparametrize(l_mu, l_log_var)
-    f_mu, f_log_var = fencoder([batch_incomplete, z, batch_mask], training=False)
-    reparametrized_face= reparametrize(f_mu, f_log_var)
-    emb = tf.concat([reparametrized_landmarks, reparametrized_face], axis=-1)
-    fake = generator([emb, batch_incomplete, batch_mask], training=False)
-    return fake
+# def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, batch_incomplete, batch_mask):
+#     l_mu, l_log_var = lencoder([batch_incomplete, z, batch_mask], training=False)
+#     reparametrized_landmarks = reparametrize(l_mu, l_log_var)
+#     f_mu, f_log_var = fencoder([batch_incomplete, z, batch_mask], training=False)
+#     reparametrized_face= reparametrize(f_mu, f_log_var)
+#     emb = tf.concat([reparametrized_landmarks, reparametrized_face], axis=-1)
+#     fake = generator([emb, batch_incomplete, batch_mask], training=False)
+#     return fake
 
 noise_dim = 512
 num_examples_to_generate = batch_size
@@ -205,7 +190,7 @@ writer = tf.summary.create_file_writer(log_dir)
 # Notice the use of `tf.function`
 # This annotation causes the function to be "compiled".
 @tf.function
-def train_step(batch, lbatch_mask):
+def train_step(batch, lbatch_mask, kl_val):
     with  tf.GradientTape() as embedding_tape:
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
@@ -218,28 +203,40 @@ def train_step(batch, lbatch_mask):
 
       one_channel_mask = lbatch_mask[:,:,:,0:1]
 
+      prob_landmarks = ( tbatch_landmarks + 1. ) / 2.
+      prob_face_mask = ( tbatch_face_mask + 1. ) / 2.
+
+      one_channel_inverted_mask = 1. - one_channel_mask
+      rgb_inverted_mask = 1. - lbatch_mask
+
       # Extractor 
 
       z_random = tf.random.normal(shape = [batch_size, noise_dim])
 
       _, zf_emb, zf_landmarks, zf_mask, zf_part = feature_embedding(tbatch_original_incomplete, z_random, one_channel_mask, training=True)
+      zer_mu, zer_log_var = extractor(tf.concat([zf_landmarks, zf_mask, zf_part], axis=-1), training=True)
+      zer_sample = reparametrize(zer_mu, zer_log_var)
+      _, _ , zer_landmarks, zer_mask, zer_part = feature_embedding(tbatch_original_incomplete, zer_sample, one_channel_mask, training=True)
+
+      # Calculate reconstruction loss for the unmasked areas
+      zf_landmarks_im = tf.sigmoid(zf_landmarks) * 2. - 1.
+      zf_mask_im = tf.sigmoid(zf_mask) * 2. - 1.
+      zer_landmarks_im = tf.sigmoid(zer_landmarks) * 2. - 1.
+      zer_mask_im = tf.sigmoid(zer_mask) * 2. - 1.
 
       zf_loss = (
-        w_landmarks * masked_weighted_cross_entropy_loss(zf_landmarks, (tbatch_landmarks + 1.) /  2., 1. - one_channel_mask, (landmark_factor)) +
-        w_face_mask * masked_weighted_cross_entropy_loss(zf_mask, (tbatch_face_mask + 1.) / 2., 1.- one_channel_mask, (mask_factor)) +
-        w_face_part * masked_loss(tbatch_face_part, zf_part, (1. - lbatch_mask))
+        w_landmarks * masked_loss(zf_landmarks_im, zer_landmarks_im, one_channel_inverted_mask) +
+        w_face_mask * masked_loss(zf_mask_im, zer_mask_im, one_channel_inverted_mask) +
+        w_face_part * masked_loss(zf_part, zer_part, rgb_inverted_mask)
       )
 
-      z_generated_mu, z_generated_log_var = extractor(tf.concat([tf.tanh(zf_landmarks), tf.tanh(zf_mask), zf_part], axis=-1), training=True)
-      generated_sample = reparametrize(z_generated_mu, z_generated_log_var)
-
       # Extractor loss
-      extractor_consistency_loss = consistency_loss * l1_loss_dim1(generated_sample, z_random)
+      extractor_consistency_loss = zf_loss
 
       # Face Embedding
       e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=True)
       extractor_sample = reparametrize(e_mu, e_log_var)
-      extractor_kl_loss = b_kl *  kl_divergence_loss(e_mu, e_log_var)
+      extractor_kl_loss = kl_val *  kl_divergence_loss(e_mu, e_log_var)
 
       total_extractor_loss = extractor_kl_loss + extractor_consistency_loss
 
@@ -257,16 +254,16 @@ def train_step(batch, lbatch_mask):
       icr_face_mask = face_mask_decoder(z_emb, training=True)
       icr_face_part = face_part_decoder(z_emb, training=True)
 
-      landmark_reconstruction_loss = w_landmarks *  reconstruction_loss(icr_landmarks, (tbatch_landmarks + 1.) / 2., (landmark_factor))
-      face_mask_reconstruction_loss = w_face_mask * reconstruction_loss(icr_face_mask, (tbatch_face_mask + 1.) / 2., (mask_factor))
+      landmark_reconstruction_loss = w_landmarks *  reconstruction_loss(icr_landmarks, prob_landmarks, (landmark_factor))
+      face_mask_reconstruction_loss = w_face_mask * reconstruction_loss(icr_face_mask, prob_face_mask, (mask_factor))
       face_part_reconstruction_loss = w_face_part * l1_reconstruction_loss(icr_face_part, tbatch_face_part)
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
       
       # Embedding kl loss
-      z1_kl_loss = kl_embedding * kl_divergence_loss(zlr_mu, zlr_log_var)
-      z2_kl_loss = kl_embedding *  kl_divergence_loss(zfr_mu, zfr_log_var)
+      z1_kl_loss = kl_val * kl_divergence_loss(zlr_mu, zlr_log_var)
+      z2_kl_loss = kl_val *  kl_divergence_loss(zfr_mu, zfr_log_var)
 
-      total_embedding_loss = embedding_reconstruction_loss + z1_kl_loss + z2_kl_loss + total_extractor_loss + zf_loss
+      total_embedding_loss = embedding_reconstruction_loss + z1_kl_loss + z2_kl_loss + total_extractor_loss 
 
     face_embedding_trainable_variables = (
       extractor.trainable_variables + 
@@ -296,9 +293,10 @@ def train_step(batch, lbatch_mask):
         "total/total_extractor_loss": total_extractor_loss,
         "extractor/kl_loss": (extractor_kl_loss),
         "extractor/consistency_loss": extractor_consistency_loss,
-        "embedding/landmark_reconstruction_loss": (landmark_reconstruction_loss),
-        "embedding/face_mask_reconstruction_loss": (face_mask_reconstruction_loss),
-        "embedding/face_part_reconstruction_loss": (face_part_reconstruction_loss),
+        "embedding/landmark_reconstruction_loss": landmark_reconstruction_loss,
+        "embedding/face_mask_reconstruction_loss": face_mask_reconstruction_loss,
+        "embedding/face_part_reconstruction_loss": face_part_reconstruction_loss,
+        "embedding/fake_reconstruction_loss": zf_loss,
         "embedding/z1_kl_loss": (z1_kl_loss),
         "embedding/z2_kl_loss": (z2_kl_loss),
       }
@@ -310,7 +308,11 @@ def train(dataset, epochs):
     start = time.time()
     batch_of_masks = mask_rgb(batch_size)
     for step, image_batch in enumerate(dataset):
-      values = train_step(image_batch, batch_of_masks)
+      # Generate a batch of masks every 100 steps
+      if step % 100 == 0:
+        batch_of_masks = mask_rgb(batch_size)
+      kl_val = scheduler.get_beta(total_steps)
+      values = train_step(image_batch, batch_of_masks, kl_val)
       total_steps += 1
       if total_steps % config["train"]["log_interval"] == 0:
         print("epoch %d step %d" % (epoch + 1, step + 1))
@@ -319,34 +321,22 @@ def train(dataset, epochs):
         with writer.as_default():
           for name, value in values["losses"].items():
             tf.summary.scalar(name, value, step=total_steps)
-          # TODO: Improve image saving
-          # original_images = (values["outputs"]["original_images"] + 1.) / 2.
-          # reconstructed_images = (values["outputs"]["reconstructed_images"] + 1.) / 2.
-          # landmark_reconstructed = tf.sigmoid(values["outputs"]["landmark_reconstructed"])
-          # face_mask_reconstructed = tf.sigmoid(values["outputs"]["face_mask_reconstructed"])
-          # face_part_reconstructed = (values["outputs"]["face_part_reconstructed"] + 1.) / 2.
-          # tf.summary.image("original_images", original_images, step=total_steps)
-          # tf.summary.image("reconstructed_images", reconstructed_images, step=total_steps)
-          # tf.summary.image("landmark_reconstructed", landmark_reconstructed, step=total_steps)
-          # tf.summary.image("face_mask_reconstructed", face_mask_reconstructed, step=total_steps)
-          # tf.summary.image("face_part_reconstructed", face_part_reconstructed, step=total_steps)
-            
 
       if total_steps % config["train"]["save_interval"] == 0:
-        mask_batch = mask_rgb(num_examples_to_generate)
-        z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
-        for item in train_dataset.take(1):
-          sample = item[:,:,:,0:3] * (1. - mask_batch)
+        # mask_batch = mask_rgb(num_examples_to_generate)
+        # z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
+        # for item in train_dataset.take(1):
+        #   sample = item[:,:,:,0:3] * (1. - mask_batch)
         tf.print("losses", values["losses"])	
-        predictions = inference(pfcGan.landmark_encoder, 
-                                pfcGan.landmark_decoder, 
-                                pfcGan.face_encoder, 
-                                pfcGan.face_mask_decoder, 
-                                pfcGan.face_part_decoder, 
-                                pfcGan.generator, 
-                                z = z_seed,
-                                batch_incomplete = sample,
-                                batch_mask = mask_batch[:,:,:,0:1])
+        # predictions = inference(pfcGan.landmark_encoder, 
+        #                         pfcGan.landmark_decoder, 
+        #                         pfcGan.face_encoder, 
+        #                         pfcGan.face_mask_decoder, 
+        #                         pfcGan.face_part_decoder, 
+        #                         pfcGan.generator, 
+        #                         z = z_seed,
+        #                         batch_incomplete = sample,
+        #                         batch_mask = mask_batch[:,:,:,0:1])
         # predictions = (predictions[i] * args[2][i]) + (args[1][i] * (1. - args[2][i]))
         checkpoint.save(file_prefix = checkpoint_prefix)
         # generate_and_save_images(predictions = predictions,
@@ -377,6 +367,9 @@ def train(dataset, epochs):
           landmark_original = (landmark_original + 1.) / 2.
           face_mask_original = (face_mask_original + 1.) / 2.
           face_part_original = (face_part_original + 1.) / 2.
+
+          #Mask original
+          original_image *= (1. - batch_of_masks[0])
 
           # Plot vs for landmarks, masks and parts
 

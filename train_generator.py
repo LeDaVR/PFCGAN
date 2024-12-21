@@ -11,7 +11,7 @@ from datetime import datetime
 
 from IPython import display
 
-from data import create_image_dataset
+from data import MultiChannelDataLoader
 from model import make_extractor_model, make_generator_model, make_discriminator_model, \
     make_landmark_encoder, make_landmark_decoder, \
     make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator
@@ -34,16 +34,18 @@ feature_img_dir = config["paths"]["feature_img_dir"]
 # Hyperparameters
 EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
-w_landmarks = 0.3
-w_face_mask = 0.2
-w_face_part = 0.5
-consistency_loss = 0.1
-adversarial_loss = 20
-rec_loss = 0.9
+w_landmarks = 2000.
+w_face_mask = 4000.
+w_face_part = 4000.
+consistency_loss = 100.
+adversarial_loss = 20.
+rec_loss = 10.
 
 
 
-train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
+# train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
+data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128,128) )
+train_dataset = data_loader.create_dataset(batch_size=batch_size)
 print(train_dataset)
 
 generator = make_generator_model()
@@ -91,7 +93,7 @@ def reparametrize(z_mean, z_log_sigma):
   return eps * tf.exp(z_log_sigma * .5) + z_mean
 
 def l1_reconstruction_loss(x, y_true):
-  l1 = tf.reduce_sum(tf.abs(y_true - x), axis = [1,2,3])
+  l1 = tf.reduce_mean(tf.abs(y_true - x), axis = [1,2,3])
   return tf.reduce_mean(l1)
 
 def reconstruction_loss(x_logit, y_true, weight=tf.constant(7.)):
@@ -100,7 +102,7 @@ def reconstruction_loss(x_logit, y_true, weight=tf.constant(7.)):
         labels=y_true, 
         pos_weight=weight
     )
-    imgs_loss = tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+    imgs_loss = tf.reduce_mean(cross_ent, axis=[1, 2, 3])
     return tf.reduce_mean(imgs_loss)
 
 def kl_divergence_loss(mean, logvar):
@@ -112,17 +114,17 @@ def masked_loss(y_true, y_pred, mask):
    l1 = (tf.abs(y_true - y_pred))
    masked_l1 = l1 * mask
    total_img_error = tf.reduce_sum(masked_l1, axis=[1,2,3])
-  #  num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])  
-  #  normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
-   return tf.reduce_mean(total_img_error)
+   num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])  
+   normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
+   return tf.reduce_mean(normalized_img_error)
 
 def masked_weighted_cross_entropy_loss(x_logits, y_true, mask, weight=tf.constant(7.)):
     cross_entropy_loss = tf.nn.weighted_cross_entropy_with_logits(logits=x_logits, labels=y_true, pos_weight=weight)
     masked_cross_entropy_loss = cross_entropy_loss * mask
     total_img_error = tf.reduce_sum(masked_cross_entropy_loss, axis=[1,2,3])
-    # num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])
-    # normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
-    return tf.reduce_mean(total_img_error)
+    num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])
+    normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
+    return tf.reduce_mean(normalized_img_error)
 
 # def compute_loss(model, x, y_true):
 #     mean, logvar = model.encode(x)
@@ -219,15 +221,20 @@ def train_step(batch, lbatch_mask):
       tbatch_face_part = batch[:,:,:,5:8]
 
       one_channel_mask = lbatch_mask[:,:,:,0:1]
+      zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
 
-      # Extractor 
+      # Given a random noise, the generator should produce a output that match de original face features on the unmasked area
       z_random = tf.random.normal(shape = [batch_size, noise_dim])
       _, f_emb, f_landmarks, f_mask, f_face_part  = feature_embedding(tbatch_original_incomplete, z_random , one_channel_mask, training=False)
       icf = generator([f_emb, tbatch_original_incomplete, one_channel_mask], training=True)
 
-      f_rec_loss = rec_loss * masked_loss(tbatch_original, icf, 1-lbatch_mask)
+      _, fc_emb, _, _, _ = feature_embedding(icf, f_emb, zero_mask, training=False)
+      f_rec_loss = consistency_loss * l1_loss_dim1(f_emb, fc_emb)
 
-      # Face Embedding
+      # TODO: Fix this is using the mask not only the face part, maybe just consistencty loss 
+      # f_rec_loss = rec_loss * masked_loss(tbatch_original, icf, 1-lbatch_mask)
+
+      # Given the embedding of the original face, the generator should produce a output that match the original face features on all the face region
       e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=False)
       extractor_sample = reparametrize(e_mu, e_log_var)
 
@@ -245,21 +252,24 @@ def train_step(batch, lbatch_mask):
 
       icr = generator([z_emb, tbatch_original_incomplete, one_channel_mask], training=True)
 
-      zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
       # Generator loss
       # gan_reconstruction_loss = tf.reduce_mean(l1_reconstruction_loss(icr, tbatch_original))
+      # TODO: this should be on the face area only
       gan_reconstruction_loss = rec_loss * masked_loss(tbatch_original, icr, lbatch_mask)
 
       icr_combined = (icr * lbatch_mask) + (tbatch_original * (1. - lbatch_mask))
 
-      # Consistency Loss
-      _, _, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr_combined, extractor_sample, zero_mask, training=False)
-      icr_landmark_loss = w_landmarks * masked_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks), lbatch_mask)
-      icr_face_mask_loss = w_face_mask * masked_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask), lbatch_mask)
+      # Consistency Loss, should be the zemb
+      _, nicr_zemb, nicr_landmarks, nicr_mask, nicr_part = feature_embedding(icr_combined, extractor_sample, zero_mask, training=False)
+      nicr_consistency_loss = consistency_loss * l1_loss_dim1(nicr_zemb, z_emb)
+      # icr_landmark_loss = consistency_loss * masked_loss(tf.sigmoid( nicr_landmarks),tf.sigmoid(icr_landmarks), lbatch_mask)
+      # icr_face_mask_loss = consistency_loss * masked_loss(tf.sigmoid(nicr_mask), tf.sigmoid(icr_face_mask), lbatch_mask)
+      
       # icr_face_part_loss = l1_reconstruction_loss(nicr_part, icr_face_part)
 
       # icr_consistency_loss = 0.5 * (icr_landmark_loss + icr_face_mask_loss + icr_face_part_loss)
-      icr_consistency_loss = icr_landmark_loss + icr_face_mask_loss 
+      # icr_consistency_loss = icr_landmark_loss + icr_face_mask_loss 
+      icr_consistency_loss = nicr_consistency_loss
 
       # Discriminator loss
 
@@ -308,11 +318,13 @@ def train_step(batch, lbatch_mask):
         "total/total_generator_loss": total_generator_loss,
         "total/global_disc_loss": global_discriminator_loss,
         "total/local_disc_loss": local_discriminator_loss,
-        "generator/reconstruction_loss": (gan_reconstruction_loss),
-        "generator/landmarks_consistency_loss": (icr_landmark_loss),
-        "generator/mask_consistency_loss": (icr_face_mask_loss),
+        # "generator/reconstruction_loss": (gan_reconstruction_loss),
+        # "generator/landmarks_consistency_loss": (icr_landmark_loss),
+        "generator/consistency_loss": (icr_consistency_loss),
+        # "generator/mask_consistency_loss": (icr_face_mask_loss),
         "generator/local_loss": (local_generator_loss),
         "generator/global_loss": (global_generator_loss),
+        "generator/fae_reconstruction_loss": (f_rec_loss),
       }
     }
 
@@ -322,6 +334,9 @@ def train(dataset, epochs):
     start = time.time()
     batch_of_masks = mask_rgb(batch_size)
     for step, image_batch in enumerate(dataset):
+      # Generate a batch of masks every 100 steps
+      if step % 100 == 0:
+        batch_of_masks = mask_rgb(batch_size)
       values = train_step(image_batch, batch_of_masks)
       total_steps += 1
       if total_steps % config["train"]["log_interval"] == 0:
@@ -367,56 +382,56 @@ def train(dataset, epochs):
                                  step = total_steps + 1)
         # Slep 4 minutes
         # time.sleep(240)
-        if config["utils"]["show_embedding"]:
-          display.clear_output(wait=True)
-          outputs = values["outputs"]
-          original_image = outputs["original_images"][0]
-          landmark_sample = outputs["landmark_reconstructed"][0]
-          mask_sample = outputs["face_mask_reconstructed"][0]
-          face_part_sample = outputs["face_part_reconstructed"][0]
-          reconstructed_image = outputs["reconstructed_images"][0]
-          mask = batch_of_masks[0]
-          fig = plt.figure(figsize=(8, 6))
-
-          # Subplot 1: Landmark sample
-          plt.subplot(2, 3, 1)
-          plt.imshow(tf.sigmoid(landmark_sample), cmap='gray')
-          plt.title("Landmark")
-          plt.axis('off')
-
-          # Subplot 2: Mask sample
-          plt.subplot(2, 3, 2)
-          plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
-          plt.title("Mask")
-          plt.axis('off')
-
-          # Subplot 3: Face part sample
-          plt.subplot(2, 3, 3)
-          plt.imshow((face_part_sample + 1.) / 2.)
-          plt.title("Face Part")
-          plt.axis('off')
-
-          # Subplot 4: Original image
-          plt.subplot(2, 3, 4)
-          plt.imshow((original_image + 1.) / 2.)
-          plt.title("Original")
-          plt.axis('off')
-
-          # Subplot 5: Reconstructed image
-          plt.subplot(2, 3, 5)
-          plt.imshow((reconstructed_image + 1.) / 2.)
-          plt.title("Reconstructed")
-          plt.axis('off')
-
-          # Subplot 6: Mask
-          plt.subplot(2, 3, 6)
-          plt.imshow(mask, cmap='gray')
-          plt.title("Random Mask")
-          plt.axis('off')
-
-          plt.show()
-          plt.close()
-
+        # if config["utils"]["show_embedding"]:
+        #   display.clear_output(wait=True)
+        #   outputs = values["outputs"]
+        #   original_image = outputs["original_images"][0]
+        #   landmark_sample = outputs["landmark_reconstructed"][0]
+        #   mask_sample = outputs["face_mask_reconstructed"][0]
+        #   face_part_sample = outputs["face_part_reconstructed"][0]
+        #   reconstructed_image = outputs["reconstructed_images"][0]
+        #   mask = batch_of_masks[0]
+        #   fig = plt.figure(figsize=(8, 6))
+        #
+        #   # Subplot 1: Landmark sample
+        #   plt.subplot(2, 3, 1)
+        #   plt.imshow(tf.sigmoid(landmark_sample), cmap='gray')
+        #   plt.title("Landmark")
+        #   plt.axis('off')
+        #
+        #   # Subplot 2: Mask sample
+        #   plt.subplot(2, 3, 2)
+        #   plt.imshow(tf.sigmoid(mask_sample), cmap='gray')
+        #   plt.title("Mask")
+        #   plt.axis('off')
+        #
+        #   # Subplot 3: Face part sample
+        #   plt.subplot(2, 3, 3)
+        #   plt.imshow((face_part_sample + 1.) / 2.)
+        #   plt.title("Face Part")
+        #   plt.axis('off')
+        #
+        #   # Subplot 4: Original image
+        #   plt.subplot(2, 3, 4)
+        #   plt.imshow((original_image + 1.) / 2.)
+        #   plt.title("Original")
+        #   plt.axis('off')
+        #
+        #   # Subplot 5: Reconstructed image
+        #   plt.subplot(2, 3, 5)
+        #   plt.imshow((reconstructed_image + 1.) / 2.)
+        #   plt.title("Reconstructed")
+        #   plt.axis('off')
+        #
+        #   # Subplot 6: Mask
+        #   plt.subplot(2, 3, 6)
+        #   plt.imshow(mask, cmap='gray')
+        #   plt.title("Random Mask")
+        #   plt.axis('off')
+        #
+        #   plt.show()
+        #   plt.close()
+        #
 
 
     # Save the model every 15 epochs
