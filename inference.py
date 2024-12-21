@@ -153,7 +153,7 @@ if __name__ == "__main__":
             
             for i in range(4):
                 plt.subplot(2, 4, i+1)
-                plt.imshow((samples[i] + 1.) /2.)
+                plt.imshow((samples[i,:,:,:] + 1.) /2.)
                 plt.axis('off')
                 plt.title("Sample {}".format(i))
                 plt.subplot(2, 4, i+5)

@@ -87,7 +87,7 @@ def make_landmark_encoder():
     #Inputs
     mask = layers.Input(shape=(128,128,1))
     incomplete = layers.Input(shape=(128,128,3))
-    z = layers.Input(shape=(z_dim,))
+    # z = layers.Input(shape=(z_dim,))
 
     # z_dense = layers.Dense(4096)(z)
     # z1 = layers.Reshape((64, 64, 1))(z_dense)
@@ -109,14 +109,13 @@ def make_landmark_encoder():
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
-    x = layers.Concatenate(axis=-1)([x, z])
-    x = layers.Dense(512)(x)
+    # x = layers.Concatenate(axis=-1)([x, z])
 
     out_dim = 256
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
     z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros')(x), -10, 10)
 
-    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
     return model
 
@@ -128,7 +127,7 @@ def make_face_encoder():
     #Inputs
     incomplete = layers.Input(shape=(128,128,3))
     mask = layers.Input(shape=(128,128,1))
-    z = layers.Input(shape=(z_dim,))
+    # z = layers.Input(shape=(z_dim,))
 
 
     # z_dense = layers.Dense(4096)(z)
@@ -152,20 +151,19 @@ def make_face_encoder():
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
-    x = layers.Concatenate(axis=-1)([x, z])
-    x = layers.Dense(512)(x)
+    # x = layers.Concatenate(axis=-1)([x, z])
 
     out_dim = 256
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
     z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros')(x), -10, 10)
 
-    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
     return model
 
 def make_landmark_decoder():
-    input_dim = 256
-    z = layers.Input(shape=(256,))
+    input_dim = 256 + 512
+    z = layers.Input(shape=(input_dim,))
     filters = 32
 
     reshape_channels = input_dim // 64
@@ -181,7 +179,7 @@ def make_landmark_decoder():
 
 # Same as landmark decoder but input 512 and output 3 channels
 def make_face_part_decoder():
-    input_dim = 512
+    input_dim = 512 + 512
     z = layers.Input(shape=(input_dim,))
     filters = 32
 
@@ -199,7 +197,7 @@ def make_face_part_decoder():
 
 # Same network as face mask decoder
 def make_face_mask_decoder():
-    input_dim = 512
+    input_dim = 512 + 512
     z = layers.Input(shape=(input_dim,))
     filters = 32
 
