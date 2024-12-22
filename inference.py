@@ -122,15 +122,30 @@ def show_embedding(landmarks, mask, face_part ):
 
 
 def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, batch_incomplete, batch_mask):
-    l_mu, l_log_var = lencoder([batch_incomplete, z, batch_mask], training=False)
+    #show batch_incomplete
+    plt.imshow(( batch_incomplete[0,:,:,:] + 1. ) /2.)
+    plt.show()
+    plt.close()
+    l_mu, l_log_var = lencoder([batch_incomplete,z, batch_mask], training=False)
     reparametrized_landmarks = reparametrize(l_mu, l_log_var)
-    f_mu, f_log_var = fencoder([batch_incomplete, z, batch_mask], training=False)
+    f_mu, f_log_var = fencoder([batch_incomplete,z, batch_mask], training=False)
     reparametrized_face= reparametrize(f_mu, f_log_var)
     emb = tf.concat([reparametrized_landmarks, reparametrized_face], axis=-1)
     fake = generator([emb, batch_incomplete, batch_mask], training=False)
     landmarks = ldecoder(reparametrized_landmarks, training=False)
     mask = mdecoder(emb, training=False)
     face_part = fdecoder(emb, training=False)
+
+    # show all the images landmarks, mask and face_part
+    plt.imshow(tf.sigmoid(landmarks[0]))
+    plt.show()
+    plt.close()
+    plt.imshow(tf.sigmoid(mask[0]))
+    plt.show()
+    plt.close()
+    plt.imshow( ( face_part[0,:,:,:] + 1. ) / 2.)
+    plt.show()
+    plt.close()
     return fake, landmarks, mask, face_part
 
 
@@ -138,13 +153,16 @@ if __name__ == "__main__":
     for batch in train_dataset:
         num_examples_to_generate = 4
         for step, item in enumerate(batch):
+            # create mask of zeros
             mask_batch = mask_rgb(1)
+            # mask_batch = tf.zeros([1, 128, 128, 1])
             mask_batch = tf.repeat(tf.expand_dims(mask_batch[0,:,:,:], 0), repeats=4, axis=0)
             z_seed = tf.random.normal([num_examples_to_generate, 512])
             tf.print(tf.shape(mask_batch))
             samples = []
             for i in range(4):
                 samples += [item * (1. - mask_batch[i,:,:,:])]
+                # samples += [item]
             # create a tensor with 4 times the image
             # sample =  tf.repeat(tf.expand_dims(sample, 0), repeats=4, axis=0)
             samples = tf.stack(samples)

@@ -24,7 +24,7 @@ def make_extractor_model():
 ### The Generator
 
 def make_generator_model():
-    l_dim = 1024
+    l_dim = 512
     input_latent = layers.Input(shape=(l_dim,))
     input_image = layers.Input(shape=(128, 128, 3))
     mask = layers.Input(shape=(128, 128, 1))
@@ -87,10 +87,10 @@ def make_landmark_encoder():
     #Inputs
     mask = layers.Input(shape=(128,128,1))
     incomplete = layers.Input(shape=(128,128,3))
-    # z = layers.Input(shape=(z_dim,))
+    z = layers.Input(shape=(z_dim,))
 
-    # z_dense = layers.Dense(4096)(z)
-    # z1 = layers.Reshape((64, 64, 1))(z_dense)
+    z_dense = layers.Dense(4096)(z)
+    z1 = layers.Reshape((64, 64, 1))(z_dense)
     # z2 = layers.Reshape((32, 32, -1))(z1)
     # z3 = layers.Reshape((16, 16, -1))(z2)
     # z4 = layers.Reshape((8, 8, -1))(z3)
@@ -99,7 +99,7 @@ def make_landmark_encoder():
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z1])
+    x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
@@ -115,7 +115,7 @@ def make_landmark_encoder():
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
     z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros')(x), -10, 10)
 
-    model = tf.keras.Model(inputs=[incomplete, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
     return model
 
@@ -127,11 +127,11 @@ def make_face_encoder():
     #Inputs
     incomplete = layers.Input(shape=(128,128,3))
     mask = layers.Input(shape=(128,128,1))
-    # z = layers.Input(shape=(z_dim,))
+    z = layers.Input(shape=(z_dim,))
 
 
-    # z_dense = layers.Dense(4096)(z)
-    # z1 = layers.Reshape((64, 64, 1))(z_dense)
+    z_dense = layers.Dense(4096)(z)
+    z1 = layers.Reshape((64, 64, 1))(z_dense)
     # z2 = layers.Reshape((32, 32, -1))(z1)
     # z3 = layers.Reshape((16, 16, -1))(z2)
     # z4 = layers.Reshape((8, 8, -1))(z3)
@@ -141,7 +141,7 @@ def make_face_encoder():
     x = layers.Concatenate(axis=-1)([incomplete, mask])
     # concatenate reshaped z between convolutions
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z1])
+    x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
@@ -157,12 +157,12 @@ def make_face_encoder():
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
     z_log_var = tf.clip_by_value(layers.Dense(out_dim, kernel_initializer='zeros')(x), -10, 10)
 
-    model = tf.keras.Model(inputs=[incomplete, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
+    model = tf.keras.Model(inputs=[incomplete, z, mask], outputs=[z_mean, z_log_var], name="landmark_encoder")
 
     return model
 
 def make_landmark_decoder():
-    input_dim = 256 + 512
+    input_dim = 256 
     z = layers.Input(shape=(input_dim,))
     filters = 32
 
@@ -179,7 +179,7 @@ def make_landmark_decoder():
 
 # Same as landmark decoder but input 512 and output 3 channels
 def make_face_part_decoder():
-    input_dim = 512 + 512
+    input_dim = 512 
     z = layers.Input(shape=(input_dim,))
     filters = 32
 
@@ -197,7 +197,7 @@ def make_face_part_decoder():
 
 # Same network as face mask decoder
 def make_face_mask_decoder():
-    input_dim = 512 + 512
+    input_dim = 512 
     z = layers.Input(shape=(input_dim,))
     filters = 32
 

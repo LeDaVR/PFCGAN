@@ -30,7 +30,7 @@ EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000
 w_face_mask = 4000
-w_face_part = 4000
+w_face_part = 6000
 # f_kl = 0.2
 # kl_embedding = 0.5
 # e_kl = 1.
@@ -155,14 +155,13 @@ checkpoint = tf.train.Checkpoint(
 ## Define the training loop
 def feature_embedding(x, z_extractor, mask, training=True):
   # Landkard encoder
-  zl_mu, zl_log_var  = landmark_encoder([x, mask], training=training)
+  zl_mu, zl_log_var  = landmark_encoder([x, z_extractor, mask], training=training)
   landmark_sample = reparametrize(zl_mu, zl_log_var)
-  landmark_conditioned = tf.concat([landmark_sample, z_extractor], axis=-1)
-  landmark_reconstructed = landmark_decoder(landmark_conditioned, training=training)
+  landmark_reconstructed = landmark_decoder(landmark_sample, training=training)
   # Mask encoder
-  zf_mu, zf_log_var  = face_encoder([x, mask], training=training)
+  zf_mu, zf_log_var  = face_encoder([x, z_extractor, mask], training=training)
   face_sample = reparametrize(zf_mu, zf_log_var)
-  z_emb = tf.concat([landmark_conditioned, face_sample], axis=-1)
+  z_emb = tf.concat([landmark_sample, face_sample], axis=-1)
   # Face mask decoder
   face_mask_reconstructed = face_mask_decoder(z_emb, training=training)
   face_part_reconstructed = face_part_decoder(z_emb, training=training)
@@ -244,11 +243,11 @@ def train_step(batch, lbatch_mask, kl_val):
       # (z1,z2), zr_emb, zr_landmarks, zr_mask, zr_part = feature_embedding(batch_original_incomplete, extractor_sample, mask_batch[:,:,:,0:1])
 
       # Landkard encoder
-      zlr_mu, zlr_log_var  = landmark_encoder([tbatch_original_incomplete, one_channel_mask], training=True)
-      zr_l_sample = tf.concat([reparametrize(zlr_mu, zlr_log_var), extractor_sample], axis=-1)
+      zlr_mu, zlr_log_var  = landmark_encoder([tbatch_original_incomplete, extractor_sample,  one_channel_mask], training=True)
+      zr_l_sample = reparametrize(zlr_mu, zlr_log_var)
       icr_landmarks = landmark_decoder(zr_l_sample, training=True)
       # Mask encoder
-      zfr_mu, zfr_log_var  = face_encoder([tbatch_original_incomplete, one_channel_mask], training=True)
+      zfr_mu, zfr_log_var  = face_encoder([tbatch_original_incomplete,extractor_sample, one_channel_mask], training=True)
       zfr_f_sample = reparametrize(zfr_mu, zfr_log_var)
       z_emb = tf.concat([zr_l_sample, zfr_f_sample], axis=-1)
       # Face mask decoder
