@@ -2,6 +2,8 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
 
+import tensorflow as tf
+
 def generate_random_mask(image_height, image_width):
     """
     Genera una máscara aleatoria para una imagen de dimensiones dadas.
@@ -11,10 +13,11 @@ def generate_random_mask(image_height, image_width):
         image_width (int): Ancho de la imagen.
 
     Returns:
-        tf.Tensor: Máscara binaria de forma (image_height, image_width).
+        tf.Tensor: Máscara binaria de forma (image_height, image_width, 1).
     """
-    minval = tf.constant(0.2, dtype=tf.float32)
-    maxval = tf.constant(0.6, dtype=tf.float32)
+    minval = 0.2
+    maxval = 0.6
+
     # Porcentaje aleatorio de la imagen que cubrirá la máscara
     mask_height_pct = tf.random.uniform([], minval=minval, maxval=maxval, dtype=tf.float32)
     mask_width_pct = tf.random.uniform([], minval=minval, maxval=maxval, dtype=tf.float32)
@@ -30,27 +33,25 @@ def generate_random_mask(image_height, image_width):
     shift_x = tf.random.uniform([], -max_shift_x, max_shift_x, dtype=tf.int32)
     shift_y = tf.random.uniform([], -max_shift_y, max_shift_y, dtype=tf.int32)
 
-    two = tf.constant(2, dtype=tf.int32)
-
     # Coordenadas del centro de la imagen
-    center_x = tf.constant(image_width // two, dtype=tf.int32)
-    center_y = tf.constant(image_height // two, dtype=tf.int32)
+    center_x = image_width // 2
+    center_y = image_height // 2
 
-    min_w_space = tf.constant(image_width // 8, dtype=tf.int32)
-    min_h_space = tf.constant(image_height // 8, dtype=tf.int32)
-    max_w_val = tf.constant( 7 * image_width // 8, dtype=tf.int32)
-    max_h_val = tf.constant( 7 * image_height // 8, dtype=tf.int32)
+    min_w_space = image_width // 8
+    min_h_space = image_height // 8
+    max_w_val = 7 * image_width // 8
+    max_h_val = 7 * image_height // 8
 
     # Coordenadas iniciales y finales de la máscara
-    semiwidth = tf.constant(mask_width // two, dtype=tf.int32)
-    semiheight = tf.constant(mask_height // two, dtype=tf.int32)
+    semiwidth = mask_width // 2
+    semiheight = mask_height // 2
     x_start = tf.clip_by_value(center_x - semiwidth + shift_x, min_w_space, max_w_val)
     y_start = tf.clip_by_value(center_y - semiheight + shift_y, min_h_space, max_h_val)
 
-    x_end = tf.clip_by_value(x_start + mask_width, (image_width //8) , max_w_val)
-    y_end = tf.clip_by_value(y_start + mask_height, (image_height // 8) , max_h_val)
+    x_end = tf.clip_by_value(x_start + mask_width, min_w_space, max_w_val)
+    y_end = tf.clip_by_value(y_start + mask_height, min_h_space, max_h_val)
 
-    # Crear la máscara
+    # Crear la máscara inicial (con ceros)
     mask = tf.zeros((image_height, image_width), dtype=tf.float32)
 
     # Llenar la región seleccionada con unos
@@ -59,6 +60,8 @@ def generate_random_mask(image_height, image_width):
         indices=tf.reshape(tf.stack(tf.meshgrid(tf.range(y_start, y_end), tf.range(x_start, x_end), indexing='ij'), axis=-1), (-1, 2)),
         updates=tf.ones(((y_end - y_start) * (x_end - x_start),), dtype=tf.float32)
     )
+
+    # Expande la máscara para añadir el canal (debe tener forma (image_height, image_width, 1))
     mask = tf.expand_dims(mask, axis=-1)
 
     return mask
@@ -67,6 +70,7 @@ def create_batch_mask(size, image_size=[128, 128]):
     masks = [generate_random_mask(image_size[0], image_size[1]) for _ in range(size)]
     return tf.stack(masks)
 
+@tf.function
 def mask_rgb(batch_size):
     image_size = [128, 128]
     
