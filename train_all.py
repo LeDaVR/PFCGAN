@@ -30,14 +30,14 @@ EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000
 w_face_mask = 4000
-w_face_part = 6000
+w_face_part = 8000
 adversarial_loss = 20.
-rec_loss = 1000.
+rec_loss = 500.
 # f_kl = 0.2
 # kl_embedding = 0.5
 # e_kl = 1.
 consistency_loss = 100.
-landmark_factor = 1.
+landmark_factor = 2.
 mask_factor = 1.
 annealing_steps = 2000
 max_beta = .5
@@ -233,7 +233,7 @@ def train_step(batch, lbatch_mask, kl_val):
       )
 
       # Extractor loss
-      extractor_consistency_loss = zf_loss
+      extractor_consistency_loss = 0.7 * zf_loss
 
       # Face Embedding
       e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=True)
@@ -333,6 +333,11 @@ def train_step(batch, lbatch_mask, kl_val):
         "embedding/fake_reconstruction_loss": zf_loss,
         "embedding/z1_kl_loss": (z1_kl_loss),
         "embedding/z2_kl_loss": (z2_kl_loss),
+        "generator/global_loss": (global_generator_loss),
+        "generator/local_loss": (local_generator_loss),
+        "generator/reconstruction_loss": (gan_reconstruction_loss),
+        "generator/global_discriminator_loss": (global_discriminator_loss),
+        "generator/local_discriminator_loss": (local_discriminator_loss),
       }
     }
 
