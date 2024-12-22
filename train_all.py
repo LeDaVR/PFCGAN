@@ -410,7 +410,7 @@ def train(dataset, epochs):
           # Plot vs for landmarks, masks and parts
 
           # Crear el gráfico con varias subgráficas
-          fig, axes = plt.subplots(5, 2, figsize=(12, 12))
+          fig, axes = plt.subplots(2, 5, figsize=(12, 12))
 
           # Títulos para cada subgráfico
           titles = [
@@ -419,36 +419,27 @@ def train(dataset, epochs):
               "Face Part Original", "Landmark vs Sample", "Sample vs Mask"
           ]
 
-          # Mostrar las imágenes
-          axes[0, 0].imshow(original_image[0])  # Primera imagen del batch
+          # Muestra las imágenes
+          axes[0, 0].imshow(original_image)
           axes[0, 0].set_title(titles[0])
-
-          axes[0, 1].imshow(reconstructed_image[0])
+          axes[0, 1].imshow(reconstructed_image)
           axes[0, 1].set_title(titles[1])
-
-          axes[1, 0].imshow(landmark_sample[0], cmap="gray")
-          axes[1, 0].set_title(titles[2])
-
-          axes[1, 1].imshow(mask_sample[0], cmap="gray")
-          axes[1, 1].set_title(titles[3])
-
-          axes[2, 0].imshow(face_part_sample[0])
-          axes[2, 0].set_title(titles[4])
-
-          axes[2, 1].imshow(landmark_original[0], cmap="gray")
-          axes[2, 1].set_title(titles[5])
-
-          axes[3, 0].imshow(face_mask_original[0], cmap="gray")
-          axes[3, 0].set_title(titles[6])
-
-          axes[3, 1].imshow(face_part_original[0])
-          axes[3, 1].set_title(titles[7])
-
-          axes[4, 0].imshow(landmark_sample[0] - landmark_original[0], cmap="hot")
-          axes[4, 0].set_title(titles[8])
-
-          axes[4, 1].imshow(mask_sample[0] - face_mask_original[0], cmap="hot")
-          axes[4, 1].set_title(titles[9])
+          axes[0, 2].imshow(landmark_sample, cmap='gray')
+          axes[0, 2].set_title(titles[2])
+          axes[0, 3].imshow(mask_sample, cmap='gray')
+          axes[0, 3].set_title(titles[3])
+          axes[0, 4].imshow(face_part_sample)
+          axes[0, 4].set_title(titles[4])
+          axes[1, 0].imshow(landmark_original, cmap='gray')
+          axes[1, 0].set_title(titles[5])
+          axes[1, 1].imshow(face_mask_original, cmap='gray')
+          axes[1, 1].set_title(titles[5])
+          axes[1, 2].imshow(face_part_original)
+          axes[1, 2].set_title(titles[6])
+          axes[1, 3].imshow(landmark_original - landmark_sample, cmap='hot')
+          axes[1, 3].set_title(titles[7])
+          axes[1, 4].imshow(mask_sample - face_mask_original, cmap='hot')
+          axes[1, 4].set_title(titles[8])
 
           # Ajusta el espacio entre las subgráficas
           plt.tight_layout()
