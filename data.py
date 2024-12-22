@@ -35,6 +35,7 @@ class MultiChannelDataLoader:
             raise ValueError("El número de imágenes en ambos directorios debe ser igual")
         if len(original_files) != len(face_part_files):
             raise ValueError("El número de imágenes en ambos directorios debe ser igual")
+        
         if len(original_files) != len(landmarks_files):
             raise ValueError("El número de imágenes en ambos directorios debe ser igual")
         
@@ -68,6 +69,7 @@ class MultiChannelDataLoader:
         
         # Configurar el dataset
         dataset = dataset.batch(batch_size)
+        dataset = dataset.filter(lambda x: tf.shape(x)[0] == batch_size)
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
         
         return dataset

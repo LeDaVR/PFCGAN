@@ -6,7 +6,7 @@ import numpy as np
 ## Create the models
 
 def make_extractor_model():
-    input_image = layers.Input(shape=(128, 128, 5))
+    input_image = layers.Input(shape=(128, 128, 3))
     x = layers.Conv2D(32, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(input_image)    
     x = layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)    
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)    
