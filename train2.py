@@ -13,6 +13,7 @@ from model import make_extractor_model, make_generator_model, make_discriminator
     make_landmark_encoder, make_landmark_decoder, \
     make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator, CyclicalAnnealingScheduler
 from utils import generate_and_save_images, mask_rgb
+from latent_clasiffier import LatentClassifier, latent_discriminator_loss
 
 import yaml
 
@@ -30,16 +31,16 @@ EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000
 w_face_mask = 4000
-w_face_part = 8000
-adversarial_loss = 20.
-rec_loss = 18.
+w_face_part = 4000
+adversarial_loss = 40.
+latent_classifier_beta = 40.
+rec_loss = .5
 # f_kl = 0.2
 # kl_embedding = 0.5
 # e_kl = 1.
 consistency_loss = 100.
 landmark_factor = 2.
 mask_factor = 1.
-annealing_steps = 2000
 max_beta = 20
 
 # train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
@@ -56,24 +57,24 @@ landmark_decoder = make_landmark_decoder()
 face_encoder = make_face_encoder()
 face_mask_decoder = make_face_mask_decoder()
 face_part_decoder = make_face_part_decoder()
+latent_classifier = LatentClassifier(latent_dim=256)
+latent_classifier512 = LatentClassifier(latent_dim=512)
 
 class PFCGAN():
-   def __init__(self, landmark_encoder, landmark_decoder, face_encoder, face_mask_decoder, face_part_decoder, generator):
+   def __init__(self, landmark_encoder, landmark_decoder, face_encoder, face_mask_decoder, face_part_decoder, generator, latent_classifier):
       self.landmark_encoder = landmark_encoder
       self.landmark_decoder = landmark_decoder
       self.face_encoder = face_encoder
       self.face_mask_decoder = face_mask_decoder
       self.face_part_decoder = face_part_decoder
       self.generator = generator
+      self.latent_classifier = latent_classifier
 
-pfcGan = PFCGAN(landmark_encoder, landmark_decoder, face_encoder, face_mask_decoder, face_part_decoder, generator)
+pfcGan = PFCGAN(landmark_encoder, landmark_decoder, face_encoder, face_mask_decoder, face_part_decoder, generator, latent_classifier)
 
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
-scheduler = CyclicalAnnealingScheduler(cycle_length=annealing_steps, max_beta=max_beta, min_beta=0.0, n_cycles=4)
-
 ### Discriminator loss
-
 def discriminator_loss(real_output, fake_output):
     real_loss = cross_entropy(tf.ones_like(real_output), real_output)
     fake_loss = cross_entropy(tf.zeros_like(fake_output), fake_output)
@@ -130,6 +131,9 @@ def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(7.)):
 global_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 local_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 face_embedding_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+latent_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+latent_discriminator_optimizer512 = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+generator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 # extractor_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 
 ### Save checkpoints
@@ -141,6 +145,11 @@ checkpoint = tf.train.Checkpoint(
                                  global_discriminator_optimizer=global_discriminator_optimizer,
                                  face_embedding_optimizer=face_embedding_optimizer,
                                  local_discriminator_optimizer=local_discriminator_optimizer,
+                                 generator_optimizer=generator_optimizer,
+                                 latent_discriminator_optimizer=latent_discriminator_optimizer,
+                                 latent_discriminator_optimizer512=latent_discriminator_optimizer512,
+                                 latent_classifier=latent_classifier,
+                                 latent_classifier512=latent_classifier512,
                                  extractor=extractor,
                                  generator=generator,
                                  discriminator=discriminator,
@@ -190,10 +199,12 @@ writer = tf.summary.create_file_writer(log_dir)
 # Notice the use of `tf.function`
 # This annotation causes the function to be "compiled".
 @tf.function
-def train_step(batch, lbatch_mask, kl_val):
+def train_step(batch, lbatch_mask):
     with  tf.GradientTape() as embedding_tape, \
       tf.GradientTape() as global_disc_tape, \
-      tf.GradientTape() as local_discriminator_tape:
+      tf.GradientTape() as local_discriminator_tape, \
+      tf.GradientTape() as latent_discriminator_tape, \
+      tf.GradientTape() as generator_tape:
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
       # lbatch_mask = mask_rgb(batch_size)
@@ -223,27 +234,34 @@ def train_step(batch, lbatch_mask, kl_val):
       zf_mask_loss = w_face_mask * masked_ce_loss_with_logits(zf_mask, prob_face_mask, one_channel_inverted_mask, weight=mask_factor)
       zf_part_loss = w_face_part * masked_loss(zf_part, tbatch_face_part, rgb_inverted_mask)
 
-      zf_loss = zf_reconstructed_loss + zf_landmarks_loss + zf_mask_loss + zf_part_loss
+      zf_loss = zf_landmarks_loss + zf_mask_loss + zf_part_loss
 
       #Skip the regression loss for the momment
 
       zer_mu, zer_log_var = extractor([ tbatch_original ], training=True)
       zer_sample = reparametrize(zer_mu, zer_log_var)
 
-      (zerl_mu, zerl_log_var), (zerf_mu, zerf_log_var), _ , zer_emb, zer_landmarks, zer_mask, zer_part = feature_embedding(tbatch_original_incomplete, zer_sample, one_channel_mask, training=True)
+      (zerl_mu, zerl_log_var), (zerf_mu, zerf_log_var), (zerl_sample, zerf_sample) , zer_emb, zer_landmarks, zer_mask, zer_part = feature_embedding(tbatch_original_incomplete, zer_sample, one_channel_mask, training=True)
       zer_reconstructed = generator([zer_emb, tbatch_original_incomplete, one_channel_mask], training=True)
       zer_reconstructed_loss = rec_loss * l1_reconstruction_loss(zer_reconstructed, tbatch_original)
       zer_landmarks_loss = w_landmarks * masked_ce_loss_with_logits(zer_landmarks, prob_landmarks, one_channel_inverted_mask, weight=landmark_factor)
       zer_mask_loss = w_face_mask * masked_ce_loss_with_logits(zer_mask, prob_face_mask, one_channel_inverted_mask, weight=mask_factor)
       zer_part_loss = w_face_part * masked_loss(zer_part, tbatch_face_part, rgb_inverted_mask)
 
-      zer_loss = zer_reconstructed_loss + zer_landmarks_loss + zer_mask_loss + zer_part_loss
+      zer_loss = zer_landmarks_loss + zer_mask_loss + zer_part_loss
 
-      extractor_kl_loss = kl_val *  kl_divergence_loss(zer_mu, zer_log_var)
-      l_kl_loss = kl_val *  kl_divergence_loss(zerl_mu, zerl_log_var)
-      f_kl_loss = kl_val *  kl_divergence_loss(zerf_mu, zerf_log_var)
+      # extractor_kl_loss =kl_divergence_loss(zer_mu, zer_log_var)
+      samples512 = tf.random.normal(shape=[batch_size, 512])
+      e_lc_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier512, zer_sample , samples512)
 
-      kl_loss = (extractor_kl_loss + l_kl_loss + f_kl_loss)
+      # Generate normal dsitribution samples
+      samples = tf.random.normal(shape=[batch_size, 256])
+      # use latent discriminator instead of kl loss
+      l_l_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier, zerl_sample , samples)
+      l_f_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier, zerf_sample , samples)
+      emb_lc_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier512, zer_emb , samples512)
+
+      kl_loss = (l_l_loss + l_f_loss + emb_lc_loss + e_lc_loss)
 
       real_output =  discriminator(tbatch_original, training=True)  
       fake_output =  discriminator(zf_reconstructed, training=True)
@@ -261,7 +279,9 @@ def train_step(batch, lbatch_mask, kl_val):
       local_generator_loss = adversarial_loss * generator_loss(local_fake_output)
       global_generator_loss = adversarial_loss * generator_loss(fake_output)
       
-      total_embedding_loss = zf_loss + zer_loss + local_generator_loss + global_generator_loss + kl_loss
+      total_embedding_loss = zf_loss + zer_loss + kl_loss
+
+      total_generator_loss = local_generator_loss + global_generator_loss + zer_reconstructed_loss + zf_reconstructed_loss
 
     face_embedding_trainable_variables = (
       extractor.trainable_variables + 
@@ -269,8 +289,12 @@ def train_step(batch, lbatch_mask, kl_val):
       landmark_encoder.trainable_variables +
       face_mask_decoder.trainable_variables + 
       face_part_decoder.trainable_variables+ 
-      landmark_decoder.trainable_variables  +
-      generator.trainable_variables
+      landmark_decoder.trainable_variables
+    )
+
+    classfifiers_trainable_variables = (
+      latent_classifier.trainable_variables + 
+      latent_classifier512.trainable_variables
     )
 
     gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
@@ -282,6 +306,12 @@ def train_step(batch, lbatch_mask, kl_val):
 
     gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
     local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
+
+    gradients_of_latent_discriminator = latent_discriminator_tape.gradient(kl_loss, classfifiers_trainable_variables)
+    latent_discriminator_optimizer.apply_gradients(zip(gradients_of_latent_discriminator, classfifiers_trainable_variables))
+
+    gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
+    generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
 
     return {
       "outputs": {
@@ -306,12 +336,15 @@ def train_step(batch, lbatch_mask, kl_val):
         "embedding/zf_mask_loss": zf_mask_loss,
         "embedding/zf_part_loss": zf_part_loss,
         "embedding/zf_reconstruction_loss": zf_loss,
-        "embedding/l_kl_loss": l_kl_loss,
-        "embedding/f_kl_loss": f_kl_loss,
-        "embedding/e_kl_loss": extractor_kl_loss,
+        "embedding/l_kl_loss": l_l_loss,
+        "embedding/f_kl_loss": l_f_loss,
+        "embedding/emb_kl_loss": emb_lc_loss,
+        "embedding/e_lc_loss": e_lc_loss,
+        # "embedding/e_kl_loss": extractor_kl_loss,
 
         "embedding/global_loss": global_generator_loss,
         "embedding/local_loss": local_generator_loss,
+        "embedding/generator_loss": total_generator_loss,
         # "generator/reconstruction_loss": (gan_reconstruction_loss),
         "discriminator/global_discriminator_loss": global_discriminator_loss,
         "discriminator/local_discriminator_loss": local_discriminator_loss,
@@ -327,8 +360,7 @@ def train(dataset, epochs):
       # Generate a batch of masks every 100 steps
       if step % 100 == 0:
         batch_of_masks = mask_rgb(batch_size)
-      kl_val = scheduler.get_beta(total_steps)
-      values = train_step(image_batch, batch_of_masks, kl_val)
+      values = train_step(image_batch, batch_of_masks)
       total_steps += 1
       if total_steps % config["train"]["log_interval"] == 0:
         print("epoch %d step %d" % (epoch + 1, step + 1))

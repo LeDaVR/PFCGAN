@@ -12,6 +12,7 @@ from data import MultiChannelDataLoader
 from model import make_extractor_model, make_generator_model, make_discriminator_model, \
     make_landmark_encoder, make_landmark_decoder, \
     make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator, CyclicalAnnealingScheduler
+from train2 import masked_ce_loss_with_logits
 from utils import generate_and_save_images, mask_rgb
 
 import yaml
@@ -31,8 +32,8 @@ batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000
 w_face_mask = 4000
 w_face_part = 8000
-adversarial_loss = 20.
-rec_loss = 500.
+adversarial_loss = 500.
+rec_loss = 400.
 # f_kl = 0.2
 # kl_embedding = 0.5
 # e_kl = 1.
@@ -40,7 +41,7 @@ consistency_loss = 100.
 landmark_factor = 2.
 mask_factor = 1.
 annealing_steps = 2000
-max_beta = .5
+max_beta = 1.
 
 # train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
 data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128, 128))
@@ -225,18 +226,20 @@ def train_step(batch, lbatch_mask, kl_val):
       zf_mask_im = tf.sigmoid(zf_mask)
       # zer_landmarks_im = tf.sigmoid(zer_landmarks) * 2. - 1.
       # zer_mask_im = tf.sigmoid(zer_mask) * 2. - 1.
+      zf_reconstructed = generator([zf_emb, tbatch_original_incomplete, one_channel_mask], training=True)
 
       zf_loss = (
-        w_landmarks * masked_loss(zf_landmarks_im, prob_landmarks, one_channel_inverted_mask) +
+        rec_loss * masked_loss(zf_reconstructed, tbatch_original, rgb_inverted_mask) +
+        w_landmarks * masked_ce_loss_with_logits(zf_landmarks, prob_landmarks, one_channel_inverted_mask, weight=landmark_factor) +
         w_face_mask * masked_loss(zf_mask_im, prob_face_mask, one_channel_inverted_mask) +
         w_face_part * masked_loss(zf_part, tbatch_face_part, rgb_inverted_mask)
       )
 
       # Extractor loss
-      extractor_consistency_loss = 0.7 * zf_loss
+      extractor_consistency_loss = zf_loss
 
       # Face Embedding
-      e_mu, e_log_var = extractor(tf.concat([tbatch_landmarks, tbatch_face_mask, tbatch_face_part], axis=-1), training=True)
+      e_mu, e_log_var = extractor([ tbatch_original ], training=True)
       extractor_sample = reparametrize(e_mu, e_log_var)
       extractor_kl_loss = kl_val *  kl_divergence_loss(e_mu, e_log_var)
 
@@ -257,7 +260,7 @@ def train_step(batch, lbatch_mask, kl_val):
       icr_face_part = face_part_decoder(z_emb, training=True)
 
       landmark_reconstruction_loss = w_landmarks *  reconstruction_loss_with_logits(icr_landmarks, prob_landmarks, (landmark_factor))
-      face_mask_reconstruction_loss = w_face_mask * reconstruction_loss_with_logits(icr_face_mask, prob_face_mask, (mask_factor))
+      face_mask_reconstruction_loss = w_face_mask * l1_reconstruction_loss(tf.sigmoid(icr_face_mask), prob_face_mask)
       face_part_reconstruction_loss = w_face_part * l1_reconstruction_loss(icr_face_part, tbatch_face_part)
       embedding_reconstruction_loss = landmark_reconstruction_loss +  face_mask_reconstruction_loss + face_part_reconstruction_loss
       
@@ -267,16 +270,14 @@ def train_step(batch, lbatch_mask, kl_val):
     
       # Generator loss
       icr = generator([z_emb, tbatch_original_incomplete, one_channel_mask], training=True)
-      gan_reconstruction_loss = rec_loss * masked_loss(tbatch_original, icr, lbatch_mask)
-
-      icr_combined = (icr * lbatch_mask) + (tbatch_original * (1. - lbatch_mask))
+      gan_reconstruction_loss = rec_loss * l1_reconstruction_loss(tbatch_original, icr)
 
       real_output =  discriminator(tbatch_original, training=True)  
-      fake_output =  discriminator(icr_combined, training=True)
+      fake_output =  discriminator(zf_reconstructed, training=True)
 
       # Local discriminator loss
       masked_batch_original = tbatch_original * (lbatch_mask)
-      masked_generated_images = icr * (lbatch_mask)
+      masked_generated_images = zf_reconstructed * (lbatch_mask)
 
       local_real_output = local_discriminator([masked_batch_original, one_channel_mask], training=True)  
       local_fake_output = local_discriminator([masked_generated_images, one_channel_mask], training=True)

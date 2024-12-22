@@ -12,16 +12,24 @@ from IPython import display
 
 from data import create_image_dataset
 from utils import generate_and_save_images, mask_rgb
+from data import MultiChannelDataLoader
 
 
 ### Load and prepare the dataset
 
 # Hyperparameters
-original_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/train_set/original'
-feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/train_set/processed'
+import yaml
+
+# Cargar configuración desde el archivo YAML
+with open("config.yaml", "r") as file:
+    config = yaml.safe_load(file)
+
+# Acceso a las rutas y configuraciones
+original_img_dir = config["paths"]["original_img_dir"]
+feature_img_dir = config["paths"]["feature_img_dir"]
 # original_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/original'
 # feature_img_dir = 'D:/My Files/UNSA/PFCIII/prepro/processed'
-batch_size = 8
+batch_size = 32
 LANDMARK_RECONSTRUCTION = 2
 FACE_MASK_RECONSTRUCTION = 1
 FACE_PART_RECONSTRUCTION = 4
@@ -32,9 +40,8 @@ EXTRACTOR_RECONSTRUCTION = 28
 GEN_LOSS = 1
 EXTRACTOR_KL = 30
 
-
-train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
-print(train_dataset)
+data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128, 128))
+train_dataset = data_loader.create_dataset(batch_size=batch_size)
 
 class CVAE(tf.keras.Model):
   """Convolutional variational autoencoder."""
@@ -48,15 +55,15 @@ class CVAE(tf.keras.Model):
         [
             tf.keras.layers.InputLayer(input_shape=(128, 128, input_channels)),
             tf.keras.layers.Conv2D(
-                filters=32, kernel_size=4, strides=(2, 2), activation='leaky_relu'),
+                filters=32, kernel_size=4, strides=(2, 2), activation='relu'),
             tf.keras.layers.Conv2D(
-                filters=64, kernel_size=4, strides=(2, 2), activation='leaky_relu'),
+                filters=64, kernel_size=4, strides=(2, 2), activation='relu'),
             tf.keras.layers.Conv2D(
-                filters=128, kernel_size=4, strides=(2, 2), activation='leaky_relu'),
+                filters=128, kernel_size=4, strides=(2, 2), activation='relu'),
             tf.keras.layers.Conv2D(
-                filters=128, kernel_size=4, strides=(2, 2), activation='leaky_relu'),
+                filters=128, kernel_size=4, strides=(2, 2), activation='relu'),
             tf.keras.layers.Conv2D(
-                filters=128, kernel_size=4, strides=(2, 2), activation='softplus'),
+                filters=128, kernel_size=4, strides=(2, 2), activation='relu'),
             tf.keras.layers.Flatten(),
             # No activation
             tf.keras.layers.Dense(latent_dim + latent_dim),
@@ -118,30 +125,18 @@ def compute_loss(model, x, y_true):
   mean, logvar = model.encode(x)
   z = model.reparameterize(mean, logvar)
   x_logit = model.decode(z)
-  cross_ent = tf.nn.weighted_cross_entropy_with_logits(logits=x_logit, labels=y_true, pos_weight=tf.constant(7.))
+  cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logit, labels=y_true)
   logpx_z = -tf.reduce_sum(cross_ent, axis=[1, 2, 3])
   logpz = log_normal_pdf(z, 0., 0.)
   logqz_x = log_normal_pdf(z, mean, logvar)
 
-  tf.print(logpx_z)
+  # tf.print(logpx_z)
   return x_logit , -tf.reduce_mean(logpx_z + logpz - logqz_x)
 
 ### Save checkpoints
 
-# checkpoint_dir = './training_checkpoints'
-# checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
-# checkpoint = tf.train.Checkpoint(generator_optimizer=generator_optimizer,
-#                                  discriminator_optimizer=discriminator_optimizer,
-#                                  face_optimizer=face_optimizer,
-#                                  landmark_optimizer=landmark_optimizer,
-#                                  generator=generator,
-#                                  discriminator=discriminator,
-#                                  landmark_encoder=landmark_encoder,
-#                                  landmark_decoder=landmark_decoder,
-#                                  face_encoder=face_encoder,
-#                                  face_mask_decoder=face_mask_decoder,
-#                                  face_part_decoder=face_part_decoder,
-#                                  )
+checkpoint_dir = './training_checkpoints'
+checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 
 ## Define the training loop
 
@@ -151,13 +146,15 @@ noise_dim = 512
 num_examples_to_generate = batch_size
 model = CVAE(noise_dim, input_channels=3, output_channels=1)
 
+checkpoint = tf.train.Checkpoint(model=model, optimizer=optimizer)
+
 # You will reuse this seed overtime (so it's easier)
 # to visualize progress in the animated GIF)
-mask_batch = mask_rgb(num_examples_to_generate)
-z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
-for item in train_dataset.take(1):
-  sample = item[:,:,:,0:3] * (1. - mask_batch)
-seed = [z_seed, sample, mask_batch]
+# mask_batch = mask_rgb(num_examples_to_generate)
+# z_seed = tf.random.normal([num_examples_to_generate, noise_dim])
+# for item in train_dataset.take(1):
+#   sample = item[:,:,:,0:3] * (1. - mask_batch)
+# seed = [z_seed, sample, mask_batch]
 
 # Notice the use of `tf.function`
 # This annotation causes the function to be "compiled".
@@ -165,10 +162,9 @@ seed = [z_seed, sample, mask_batch]
 def train_step(batch):
     with tf.GradientTape() as landmark_tape:
       # Prepare the batch
-      batch_size = tf.shape(batch)[0]
       batch_mask = mask_rgb(batch_size)
       batch_original = batch[:,:,:,0:3]
-      batch_original_incomplete = batch_original * (1. - batch_mask)
+      batch_original_incomplete = batch_original 
       batch_landmarks = batch[:,:,:,3:4]
       batch_face_mask = batch[:,:,:,4:5]
       batch_face_part = batch[:,:,:,5:8]
@@ -191,28 +187,39 @@ def train_step(batch):
     }
 
 def train(dataset, epochs):
+  total_steps = 0
   for epoch in range(epochs):
     start = time.time()
 
     for step, image_batch in enumerate(dataset):
+      total_steps += 1
       values = train_step(image_batch)
 
-    # Produce images for the GIF as you go
-    display.clear_output(wait=True)
+      if (total_steps + 1) % 100 == 0:
+        display.clear_output(wait=True)
+        outputs = values["outputs"]
+        landmark_sample = tf.sigmoid(outputs["x_logit"][0])
+        image = ( image_batch[0][:,:,0:3] + 1. ) / 2.
+        fig = plt.figure(figsize=(6, 6))
+        # plot imagae and landmark
+        plt.subplot(1, 2, 1)
+        plt.imshow(image)
+        plt.axis('off')
+        plt.subplot(1, 2, 2)
+        plt.imshow(landmark_sample , cmap='gray')
+        plt.axis('off')
+        plt.show()
+        plt.close()
+        display.clear_output(wait=True)
+        tf.print("losses", values["losses"])	
+        checkpoint.save(file_prefix = checkpoint_prefix)
 
-    tf.print("losses", values["losses"])	
+    # Produce images for the GIF as you go
+
     # generate_and_save_images(generator,
     #                       epoch = epoch + 1,
     #                       args = seed)
 
-    if (epoch + 1) % 4 == 0:
-      outputs = values["outputs"]
-      landmark_sample = tf.sigmoid(outputs["x_logit"][0])
-      fig = plt.figure(figsize=(6, 6))
-      plt.subplot(1, 1, 1)
-      plt.imshow(landmark_sample , cmap='gray')
-      plt.axis('off')
-      plt.show()
 
     # # Save the model every 15 epochs
     # if (epoch + 1) % 15 == 0:
@@ -221,13 +228,12 @@ def train(dataset, epochs):
     print ('Time for epoch {} is {} sec'.format(epoch + 1, time.time()-start))
 
   # Generate after the final epoch
-  display.clear_output(wait=True)
   # generate_and_save_images(generator,
   #                          epoch = epochs,
   #                          args =seed)
 
 
 ## Train the model
-# checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
+checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
 train(train_dataset, EPOCHS)
 
