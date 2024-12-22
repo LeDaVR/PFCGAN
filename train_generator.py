@@ -39,7 +39,7 @@ w_face_mask = 4000.
 w_face_part = 4000.
 consistency_loss = 100.
 adversarial_loss = 20.
-rec_loss = 10.
+rec_loss = 1000.
 
 
 
@@ -225,12 +225,12 @@ def train_step(batch, lbatch_mask):
       zero_mask = tf.zeros_like(lbatch_mask[:,:,:,0:1])
 
       # Given a random noise, the generator should produce a output that match de original face features on the unmasked area
-      z_random = tf.random.normal(shape = [batch_size, noise_dim])
-      _, f_emb, f_landmarks, f_mask, f_face_part  = feature_embedding(tbatch_original_incomplete, z_random , one_channel_mask, training=False)
-      icf = generator([f_emb, tbatch_original_incomplete, one_channel_mask], training=True)
+      # z_random = tf.random.normal(shape = [batch_size, noise_dim])
+      # _, f_emb, f_landmarks, f_mask, f_face_part  = feature_embedding(tbatch_original_incomplete, z_random , one_channel_mask, training=False)
+      # icf = generator([f_emb, tbatch_original_incomplete, one_channel_mask], training=True)
 
-      _, fc_emb, _, _, _ = feature_embedding(icf, z_random, zero_mask, training=False)
-      f_rec_loss = consistency_loss * l1_loss_dim1(f_emb, fc_emb)
+      # _, fc_emb, _, _, _ = feature_embedding(icf, z_random, zero_mask, training=False)
+      # f_rec_loss = consistency_loss * l1_loss_dim1(f_emb, fc_emb)
 
       # TODO: Fix this is using the mask not only the face part, maybe just consistencty loss 
       # f_rec_loss = rec_loss * masked_loss(tbatch_original, icf, 1-lbatch_mask)
@@ -294,8 +294,7 @@ def train_step(batch, lbatch_mask):
       global_generator_loss = adversarial_loss * generator_loss(fake_output)
 
       total_generator_loss = (
-        gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss +
-        f_rec_loss
+        gan_reconstruction_loss + icr_consistency_loss  + local_generator_loss + global_generator_loss 
       )
 
     gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
@@ -319,13 +318,13 @@ def train_step(batch, lbatch_mask):
         "total/total_generator_loss": total_generator_loss,
         "total/global_disc_loss": global_discriminator_loss,
         "total/local_disc_loss": local_discriminator_loss,
-        # "generator/reconstruction_loss": (gan_reconstruction_loss),
+        "generator/reconstruction_loss": (gan_reconstruction_loss),
         # "generator/landmarks_consistency_loss": (icr_landmark_loss),
         "generator/consistency_loss": (icr_consistency_loss),
         # "generator/mask_consistency_loss": (icr_face_mask_loss),
         "generator/local_loss": (local_generator_loss),
         "generator/global_loss": (global_generator_loss),
-        "generator/fae_reconstruction_loss": (f_rec_loss),
+        # "generator/fae_reconstruction_loss": (f_rec_loss),
       }
     }
 
