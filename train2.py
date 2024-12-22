@@ -40,7 +40,7 @@ consistency_loss = 100.
 landmark_factor = 2.
 mask_factor = 1.
 annealing_steps = 2000
-max_beta = .20
+max_beta = 20
 
 # train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
 data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128, 128))
