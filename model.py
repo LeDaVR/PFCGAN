@@ -24,7 +24,7 @@ def make_extractor_model():
 ### The Generator
 
 def make_generator_model():
-    l_dim = 512
+    l_dim = 1024
     input_latent = layers.Input(shape=(l_dim,))
     input_image = layers.Input(shape=(128, 128, 3))
     mask = layers.Input(shape=(128, 128, 1))

@@ -169,13 +169,15 @@ checkpoint = tf.train.Checkpoint(
 
 def feature_embedding(x, z_extractor, mask, training=True):
   # Landkard encoder
-  zl_mu, zl_log_var  = landmark_encoder([x, z_extractor, mask], training=training)
+  zl_mu, zl_log_var  = landmark_encoder([x, mask], training=training)
   landmark_sample = reparametrize(zl_mu, zl_log_var)
-  landmark_reconstructed = landmark_decoder(landmark_sample, training=training)
+  landmark_conditioned = tf.concat([landmark_sample, z_extractor], axis=-1)
+  # tf.print(tf.shape(landmark_conditioned))
+  landmark_reconstructed = landmark_decoder(landmark_conditioned, training=training)
   # Mask encoder
-  zf_mu, zf_log_var  = face_encoder([x, z_extractor, mask], training=training)
+  zf_mu, zf_log_var  = face_encoder([x, mask], training=training)
   face_sample = reparametrize(zf_mu, zf_log_var)
-  z_emb = tf.concat([landmark_sample, face_sample], axis=-1)
+  z_emb = tf.concat([landmark_conditioned, face_sample], axis=-1)
   # Face mask decoder
   face_mask_reconstructed = face_mask_decoder(z_emb, training=training)
   face_part_reconstructed = face_part_decoder(z_emb, training=training)
@@ -184,9 +186,9 @@ def feature_embedding(x, z_extractor, mask, training=True):
 
 
 def inference(lencoder, ldecoder, fencoder, mdecoder, fdecoder, generator, z, batch_incomplete, batch_mask):
-    l_mu, l_log_var = lencoder([batch_incomplete, z, batch_mask], training=False)
-    reparametrized_landmarks = reparametrize(l_mu, l_log_var)
-    f_mu, f_log_var = fencoder([batch_incomplete, z, batch_mask], training=False)
+    l_mu, l_log_var = lencoder([batch_incomplete, batch_mask], training=False)
+    reparametrized_landmarks = tf.concat([reparametrize(l_mu, l_log_var), z], axis=-1)
+    f_mu, f_log_var = fencoder([batch_incomplete, batch_mask], training=False)
     reparametrized_face= reparametrize(f_mu, f_log_var)
     emb = tf.concat([reparametrized_landmarks, reparametrized_face], axis=-1)
     fake = generator([emb, batch_incomplete, batch_mask], training=False)
@@ -228,7 +230,7 @@ def train_step(batch, lbatch_mask):
       _, f_emb, f_landmarks, f_mask, f_face_part  = feature_embedding(tbatch_original_incomplete, z_random , one_channel_mask, training=False)
       icf = generator([f_emb, tbatch_original_incomplete, one_channel_mask], training=True)
 
-      _, fc_emb, _, _, _ = feature_embedding(icf, f_emb, zero_mask, training=False)
+      _, fc_emb, _, _, _ = feature_embedding(icf, z_random, zero_mask, training=False)
       f_rec_loss = consistency_loss * l1_loss_dim1(f_emb, fc_emb)
 
       # TODO: Fix this is using the mask not only the face part, maybe just consistencty loss 
@@ -239,11 +241,11 @@ def train_step(batch, lbatch_mask):
       extractor_sample = reparametrize(e_mu, e_log_var)
 
       # Landkard encoder
-      zlr_mu, zlr_log_var  = landmark_encoder([tbatch_original_incomplete, extractor_sample, one_channel_mask], training=False)
-      zr_l_sample = reparametrize(zlr_mu, zlr_log_var)
+      zlr_mu, zlr_log_var  = landmark_encoder([tbatch_original_incomplete, one_channel_mask], training=False)
+      zr_l_sample = tf.concat([reparametrize(zlr_mu, zlr_log_var), extractor_sample], axis=-1)
       icr_landmarks = landmark_decoder(zr_l_sample, training=False)
       # Mask encoder
-      zfr_mu, zfr_log_var  = face_encoder([tbatch_original_incomplete, extractor_sample, one_channel_mask], training=False)
+      zfr_mu, zfr_log_var  = face_encoder([tbatch_original_incomplete, one_channel_mask], training=False)
       zfr_f_sample = reparametrize(zfr_mu, zfr_log_var)
       z_emb = tf.concat([zr_l_sample, zfr_f_sample], axis=-1)
       # Face mask decoder

@@ -14,8 +14,8 @@ def generate_random_mask(image_height, image_width):
         tf.Tensor: Máscara binaria de forma (image_height, image_width).
     """
     # Porcentaje aleatorio de la imagen que cubrirá la máscara
-    mask_height_pct = tf.random.uniform([], 0.2, 0.6)
-    mask_width_pct = tf.random.uniform([], 0.2, 0.6)
+    mask_height_pct = tf.random.uniform([], tf.float32(0.2), tf.float32(0.6))
+    mask_width_pct = tf.random.uniform([], tf.float32(0.2), tf.float32(0.6))
 
     # Tamaño de la máscara en píxeles
     mask_height = tf.cast(mask_height_pct * image_height, tf.int32)
@@ -29,15 +29,17 @@ def generate_random_mask(image_height, image_width):
     shift_y = tf.random.uniform([], -max_shift_y, max_shift_y, dtype=tf.int32)
 
     # Coordenadas del centro de la imagen
-    center_x = image_width // 2
-    center_y = image_height // 2
+    center_x = tf.int32(image_width // 2)
+    center_y = tf.int32(image_height // 2)
 
     # Coordenadas iniciales y finales de la máscara
-    x_start = tf.clip_by_value(center_x - mask_width // 2 + shift_x, image_width // 8, (7 * image_width) // 8)
-    y_start = tf.clip_by_value(center_y - mask_height // 2 + shift_y, image_height // 8, (7 * image_height) // 8)
+    semiwidth = tf.divide(mask_width, 2)
+    semiheight = tf.divide(mask_height, 2)
+    x_start = tf.clip_by_value(center_x - semiwidth + shift_x, image_width // 8., tf.int32(7 * image_width) // 8)
+    y_start = tf.clip_by_value(center_y - semiheight + shift_y, image_height // 8., tf.int32(7 * image_height) // 8)
 
-    x_end = tf.clip_by_value(x_start + mask_width, image_width // 8, (7 * image_width) // 8)
-    y_end = tf.clip_by_value(y_start + mask_height, image_height // 8, (7 * image_height) // 8)
+    x_end = tf.clip_by_value(tf.add(x_start, mask_width), tf.divide(image_width,8) , tf.divide((7 * image_width), 8))
+    y_end = tf.clip_by_value(tf.add(y_start, mask_height), tf.divide(image_height,8) , tf.divide((7 * image_height), 8))
 
     # Crear la máscara
     mask = tf.zeros((image_height, image_width), dtype=tf.float32)
@@ -46,7 +48,7 @@ def generate_random_mask(image_height, image_width):
     mask = tf.tensor_scatter_nd_update(
         mask,
         indices=tf.reshape(tf.stack(tf.meshgrid(tf.range(y_start, y_end), tf.range(x_start, x_end), indexing='ij'), axis=-1), (-1, 2)),
-        updates=tf.ones(((y_end - y_start) * (x_end - x_start),), dtype=tf.float32)
+        updates=tf.ones((tf.subtract(y_end, y_start) * tf.subtract(x_end, x_start),), dtype=tf.float32)
     )
     mask = tf.expand_dims(mask, axis=-1)
 
@@ -61,11 +63,9 @@ def mask_rgb(batch_size):
     
     # Genera máscaras en escala de grises
     gray_mask = create_batch_mask(batch_size, image_size)
-    tf.print(tf.shape(gray_mask))
-    
+
     # Convierte a máscara RGB
     rgb_mask = tf.repeat(gray_mask, repeats=3, axis=-1)
-    tf.print(tf.shape(rgb_mask))
     
     return rgb_mask
 
