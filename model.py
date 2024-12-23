@@ -76,7 +76,7 @@ def make_discriminator_model():
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)
     x = layers.Flatten()(x)
-    x = layers.Dense(1)(x)
+    x = layers.Dense(1 , activation='sigmoid')(x)
 
     return tf.keras.Model(inputs=[input_image], outputs=x, name='global_discriminator')
 
@@ -224,7 +224,7 @@ def make_local_discriminator():
     x = layers.Conv2D(features * 8, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
     x = layers.Conv2D(features * 8, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
     x = layers.Flatten()(x)
-    x = layers.Dense(1)(x)
+    x = layers.Dense(1, activation='sigmoid')(x)
 
     model = tf.keras.Model(inputs=[input_image, mask], outputs=x, name="local_discriminator")
 

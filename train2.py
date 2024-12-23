@@ -307,10 +307,10 @@ def train_step(batch, lbatch_mask):
 
       total_rec_loss = zer_reconstructed_loss + zf_reconstructed_loss
 
-      imp = compute_reconstruction_importance(tf.reduce_mean(tf.concat([local_fake_output, fake_output], axis=-1)) * 100)
-      rec_lambda = compute_lambda_reconstruction(global_generator_loss + local_generator_loss, total_rec_loss, imp)
+      # imp = compute_reconstruction_importance(tf.reduce_mean(tf.concat([local_fake_output, fake_output], axis=-1)) * 100)
+      # rec_lambda = compute_lambda_reconstruction(global_generator_loss + local_generator_loss, total_rec_loss, imp)
 
-      total_generator_loss = local_generator_loss + global_generator_loss + rec_lambda * total_rec_loss
+      total_generator_loss = local_generator_loss + global_generator_loss + total_rec_loss
 
     face_embedding_trainable_variables = (
       extractor.trainable_variables + 
