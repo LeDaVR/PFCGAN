@@ -13,7 +13,7 @@ from model import make_extractor_model, make_generator_model, make_discriminator
     make_landmark_encoder, make_landmark_decoder, \
     make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator, CyclicalAnnealingScheduler
 from utils import generate_and_save_images, mask_rgb
-from latent_clasiffier import LatentClassifier, latent_discriminator_loss
+from latent_clasiffier import LatentClassifier, latent_discriminator_loss, latent_generator_loss
 
 import yaml
 
@@ -39,8 +39,8 @@ rec_loss = .5
 # kl_embedding = 0.5
 # e_kl = 1.
 consistency_loss = 100.
-landmark_factor = 2.
-mask_factor = 1.
+landmark_factor = 5.
+mask_factor = 2.5
 max_beta = 20
 
 # train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
@@ -252,16 +252,31 @@ def train_step(batch, lbatch_mask):
 
       # extractor_kl_loss =kl_divergence_loss(zer_mu, zer_log_var)
       samples512 = tf.random.normal(shape=[batch_size, 512])
-      e_lc_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier512, zer_sample , samples512)
+      samples = tf.random.normal(shape=[batch_size, 256])
+
+      clas512_out_real = latent_classifier512(samples512)
+      zer_out = latent_classifier512(zer_emb)
+      emb_out = latent_classifier512(zer_emb)
+      class256_out_real = latent_classifier(samples)
+      zerl_out = latent_classifier(zerl_sample)
+      zerf_out = latent_classifier(zerf_sample)
+
 
       # Generate normal dsitribution samples
-      samples = tf.random.normal(shape=[batch_size, 256])
       # use latent discriminator instead of kl loss
-      l_l_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier, zerl_sample , samples)
-      l_f_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier, zerf_sample , samples)
-      emb_lc_loss = latent_classifier_beta *  latent_discriminator_loss(latent_classifier512, zer_emb , samples512)
+      e_lc_loss = latent_classifier_beta *  latent_discriminator_loss(clas512_out_real , zer_out)
+      l_l_loss = latent_classifier_beta *  latent_discriminator_loss(class256_out_real , zerl_out)
+      l_f_loss = latent_classifier_beta *  latent_discriminator_loss(class256_out_real , zerf_out)
+      emb_lc_loss = latent_classifier_beta *  latent_discriminator_loss(clas512_out_real , emb_out)
 
-      kl_loss = (l_l_loss + l_f_loss + emb_lc_loss + e_lc_loss)
+      classifier_loss = (l_l_loss + l_f_loss + emb_lc_loss + e_lc_loss)
+      
+      classifier_e_loss = latent_classifier_beta *  latent_generator_loss(zer_out )
+      classifier_l_loss = latent_classifier_beta *  latent_generator_loss(zerl_out)
+      classifier_f_loss = latent_classifier_beta *  latent_generator_loss(zerf_out )
+      classifier_zemb_loss = latent_classifier_beta *  latent_generator_loss(emb_out )
+
+      total_classifier_gen_loss = classifier_e_loss + classifier_l_loss + classifier_f_loss + classifier_zemb_loss
 
       real_output =  discriminator(tbatch_original, training=True)  
       fake_output =  discriminator(zf_reconstructed, training=True)
@@ -279,7 +294,7 @@ def train_step(batch, lbatch_mask):
       local_generator_loss = adversarial_loss * generator_loss(local_fake_output)
       global_generator_loss = adversarial_loss * generator_loss(fake_output)
       
-      total_embedding_loss = zf_loss + zer_loss + kl_loss
+      total_embedding_loss = zf_loss + zer_loss + total_classifier_gen_loss
 
       total_generator_loss = local_generator_loss + global_generator_loss + zer_reconstructed_loss + zf_reconstructed_loss
 
@@ -307,7 +322,7 @@ def train_step(batch, lbatch_mask):
     gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
     local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
 
-    gradients_of_latent_discriminator = latent_discriminator_tape.gradient(kl_loss, classfifiers_trainable_variables)
+    gradients_of_latent_discriminator = latent_discriminator_tape.gradient(classifier_loss, classfifiers_trainable_variables)
     latent_discriminator_optimizer.apply_gradients(zip(gradients_of_latent_discriminator, classfifiers_trainable_variables))
 
     gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
@@ -326,28 +341,34 @@ def train_step(batch, lbatch_mask):
       },
       "losses": {	
         "total/total_embedding_loss": total_embedding_loss,
+        "total/total_generator_loss": total_generator_loss,
 
         # "extractor/consistency_loss": extractor_consistency_loss,
         "embedding/zer_landmarks_loss": zer_landmarks_loss,
         "embedding/zer_mask_loss": zer_mask_loss,
         "embedding/zer_part_loss": zer_part_loss,
-        "embedding/zer_reconstruction_loss": zer_loss,
+        "generator/zer_reconstruction_loss": zer_loss,
         "embedding/zf_landmarks_loss": zf_landmarks_loss,
         "embedding/zf_mask_loss": zf_mask_loss,
         "embedding/zf_part_loss": zf_part_loss,
-        "embedding/zf_reconstruction_loss": zf_loss,
-        "embedding/l_kl_loss": l_l_loss,
-        "embedding/f_kl_loss": l_f_loss,
-        "embedding/emb_kl_loss": emb_lc_loss,
-        "embedding/e_lc_loss": e_lc_loss,
-        # "embedding/e_kl_loss": extractor_kl_loss,
+        "embedding/classifier_loss": total_classifier_gen_loss,
+        "embedding/e_lc_loss": classifier_e_loss,
+        "embedding/l_l_loss": classifier_l_loss,
+        "embedding/f_l_loss": classifier_f_loss,
+        "embedding/emb_loss": classifier_zemb_loss,
+        
 
-        "embedding/global_loss": global_generator_loss,
-        "embedding/local_loss": local_generator_loss,
-        "embedding/generator_loss": total_generator_loss,
-        # "generator/reconstruction_loss": (gan_reconstruction_loss),
+        "generator/global_loss": global_generator_loss,
+        "generator/local_loss": local_generator_loss,
+        "generator/generator_loss": total_generator_loss,
+        "generator/zf_reconstruction_loss": zf_loss,
+
         "discriminator/global_discriminator_loss": global_discriminator_loss,
         "discriminator/local_discriminator_loss": local_discriminator_loss,
+        "discriminator/l_kl_loss": l_l_loss,
+        "discriminator/f_kl_loss": l_f_loss,
+        "discriminator/emb_kl_loss": emb_lc_loss,
+        "discriminator/e_lc_loss": e_lc_loss,
       }
     }
 
