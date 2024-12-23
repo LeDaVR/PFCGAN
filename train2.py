@@ -34,7 +34,7 @@ w_face_mask = 4000
 w_face_part = 6000
 adversarial_loss = 40.
 latent_classifier_beta = 40.
-rec_loss = .5
+rec_loss = 1.
 # f_kl = 0.2
 # kl_embedding = 0.5
 # e_kl = 1.
@@ -255,12 +255,11 @@ def train_step(batch, lbatch_mask):
       samples = tf.random.normal(shape=[batch_size, 256])
 
       clas512_out_real = latent_classifier512(samples512)
-      zer_out = latent_classifier512(zer_emb)
+      zer_out = latent_classifier512(zer_sample)
       emb_out = latent_classifier512(zer_emb)
       class256_out_real = latent_classifier(samples)
       zerl_out = latent_classifier(zerl_sample)
       zerf_out = latent_classifier(zerf_sample)
-
 
       # Generate normal dsitribution samples
       # use latent discriminator instead of kl loss
@@ -347,7 +346,6 @@ def train_step(batch, lbatch_mask):
         "embedding/zer_landmarks_loss": zer_landmarks_loss,
         "embedding/zer_mask_loss": zer_mask_loss,
         "embedding/zer_part_loss": zer_part_loss,
-        "generator/zer_reconstruction_loss": zer_loss,
         "embedding/zf_landmarks_loss": zf_landmarks_loss,
         "embedding/zf_mask_loss": zf_mask_loss,
         "embedding/zf_part_loss": zf_part_loss,
@@ -361,7 +359,8 @@ def train_step(batch, lbatch_mask):
         "generator/global_loss": global_generator_loss,
         "generator/local_loss": local_generator_loss,
         "generator/generator_loss": total_generator_loss,
-        "generator/zf_reconstruction_loss": zf_loss,
+        "generator/zer_reconstruction_loss": zer_reconstructed_loss,
+        "generator/zf_reconstruction_loss": zf_reconstructed_loss,
 
         "discriminator/global_discriminator_loss": global_discriminator_loss,
         "discriminator/local_discriminator_loss": local_discriminator_loss,
