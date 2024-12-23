@@ -32,8 +32,8 @@ batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000
 w_face_mask = 4000
 w_face_part = 6000
-adversarial_loss = 40.
-latent_classifier_beta = 40.
+adversarial_loss = 20.
+latent_classifier_beta = 15.
 rec_loss = 1.
 # f_kl = 0.2
 # kl_embedding = 0.5
@@ -196,6 +196,13 @@ num_examples_to_generate = batch_size
 log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 writer = tf.summary.create_file_writer(log_dir)
 
+def compute_lambda_reconstruction(generator_loss, reconstruction_loss, target_percentage):
+    eps = 1e-8  # Para evitar divisiones por cero
+    return (target_percentage * generator_loss) / ((1 - target_percentage) * reconstruction_loss + eps)
+
+def compute_reconstruction_importance(discriminator_accuracy, max_percentage=0.8):
+    return max(0.0, min(max_percentage * (discriminator_accuracy - 50) / 50, max_percentage))
+
 # Notice the use of `tf.function`
 # This annotation causes the function to be "compiled".
 @tf.function
@@ -263,10 +270,10 @@ def train_step(batch, lbatch_mask):
 
       # Generate normal dsitribution samples
       # use latent discriminator instead of kl loss
-      e_lc_loss = latent_classifier_beta *  latent_discriminator_loss(clas512_out_real , zer_out)
-      l_l_loss = latent_classifier_beta *  latent_discriminator_loss(class256_out_real , zerl_out)
-      l_f_loss = latent_classifier_beta *  latent_discriminator_loss(class256_out_real , zerf_out)
-      emb_lc_loss = latent_classifier_beta *  latent_discriminator_loss(clas512_out_real , emb_out)
+      e_lc_loss = latent_discriminator_loss(clas512_out_real , zer_out)
+      l_l_loss = latent_discriminator_loss(class256_out_real , zerl_out)
+      l_f_loss = latent_discriminator_loss(class256_out_real , zerf_out)
+      emb_lc_loss = latent_discriminator_loss(clas512_out_real , emb_out)
 
       classifier_loss = (l_l_loss + l_f_loss + emb_lc_loss + e_lc_loss)
       
@@ -287,15 +294,20 @@ def train_step(batch, lbatch_mask):
       local_real_output = local_discriminator([masked_batch_original, one_channel_mask], training=True)  
       local_fake_output = local_discriminator([masked_generated_images, one_channel_mask], training=True)
 
-      global_discriminator_loss = adversarial_loss * discriminator_loss(real_output, fake_output)
-      local_discriminator_loss = adversarial_loss * discriminator_loss(local_real_output, local_fake_output)
+      global_discriminator_loss = discriminator_loss(real_output, fake_output)
+      local_discriminator_loss = discriminator_loss(local_real_output, local_fake_output)
 
       local_generator_loss = adversarial_loss * generator_loss(local_fake_output)
       global_generator_loss = adversarial_loss * generator_loss(fake_output)
       
       total_embedding_loss = zf_loss + zer_loss + total_classifier_gen_loss
 
-      total_generator_loss = local_generator_loss + global_generator_loss + zer_reconstructed_loss + zf_reconstructed_loss
+      total_rec_loss = zer_reconstructed_loss + zf_reconstructed_loss
+
+      imp = compute_reconstruction_importance(tf.reduce_mean([local_fake_output, fake_output]) * 100)
+      rec_lambda = compute_lambda_reconstruction(global_generator_loss + local_generator_loss, total_rec_loss, imp)
+
+      total_generator_loss = local_generator_loss + global_generator_loss + rec_lambda * total_rec_loss
 
     face_embedding_trainable_variables = (
       extractor.trainable_variables + 
