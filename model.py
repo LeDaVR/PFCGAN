@@ -91,8 +91,8 @@ def make_landmark_encoder():
 
     z_dense = layers.Dense(4096)(z)
     z1 = layers.Reshape((64, 64, 1))(z_dense)
-    # z2 = layers.Reshape((32, 32, -1))(z1)
-    # z3 = layers.Reshape((16, 16, -1))(z2)
+    z2 = layers.Reshape((32, 32, -1))(z1)
+    z3 = layers.Reshape((16, 16, -1))(z2)
     # z4 = layers.Reshape((8, 8, -1))(z3)
     # z5 = layers.Reshape((4, 4, -1))(z4)
 
@@ -101,15 +101,15 @@ def make_landmark_encoder():
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z2])
+    x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z3])
+    x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z5])
     x = layers.Flatten()(x)
-    # x = layers.Concatenate(axis=-1)([x, z])
+    x = layers.Concatenate(axis=-1)([x, z])
 
     out_dim = 256
     z_mean = layers.Dense(out_dim, kernel_initializer='zeros')(x)
@@ -132,8 +132,8 @@ def make_face_encoder():
 
     z_dense = layers.Dense(4096)(z)
     z1 = layers.Reshape((64, 64, 1))(z_dense)
-    # z2 = layers.Reshape((32, 32, -1))(z1)
-    # z3 = layers.Reshape((16, 16, -1))(z2)
+    z2 = layers.Reshape((32, 32, -1))(z1)
+    z3 = layers.Reshape((16, 16, -1))(z2)
     # z4 = layers.Reshape((8, 8, -1))(z3)
     # z5 = layers.Reshape((4, 4, -1))(z4)
 
@@ -143,9 +143,9 @@ def make_face_encoder():
     x = layers.Conv2D(filters, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     x = layers.Concatenate(axis=-1)([x, z1])
     x = layers.Conv2D(filters * 2, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z2])
+    x = layers.Concatenate(axis=-1)([x, z2])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
-    # x = layers.Concatenate(axis=-1)([x, z3])
+    x = layers.Concatenate(axis=-1)([x, z3])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
     # x = layers.Concatenate(axis=-1)([x, z4])
     x = layers.Conv2D(filters * 4, (4,4), (2,2), padding='same',activation='leaky_relu')(x)
