@@ -200,8 +200,11 @@ def compute_lambda_reconstruction(generator_loss, reconstruction_loss, target_pe
     eps = 1e-8  # Para evitar divisiones por cero
     return (target_percentage * generator_loss) / ((1 - target_percentage) * reconstruction_loss + eps)
 
-def compute_reconstruction_importance(discriminator_accuracy, max_percentage=0.8):
-    return max(0.0, min(max_percentage * (discriminator_accuracy - 50) / 50, max_percentage))
+def compute_reconstruction_importance(discriminator_accuracy, max_percentage=80.0):
+    # Asegúrate de que las operaciones sean tensoriales
+    percentage = (discriminator_accuracy - 50) / 50
+    adjusted_percentage = tf.maximum(0.0, tf.minimum(percentage, 1.0))  # El valor ajustado entre 0 y 1
+    return max_percentage * adjusted_percentage
 
 # Notice the use of `tf.function`
 # This annotation causes the function to be "compiled".
@@ -304,7 +307,7 @@ def train_step(batch, lbatch_mask):
 
       total_rec_loss = zer_reconstructed_loss + zf_reconstructed_loss
 
-      imp = compute_reconstruction_importance(tf.reduce_mean([local_fake_output, fake_output]) * 100)
+      imp = compute_reconstruction_importance(tf.reduce_mean(tf.concat([local_fake_output, fake_output], axis=-1)) * 100)
       rec_lambda = compute_lambda_reconstruction(global_generator_loss + local_generator_loss, total_rec_loss, imp)
 
       total_generator_loss = local_generator_loss + global_generator_loss + rec_lambda * total_rec_loss
