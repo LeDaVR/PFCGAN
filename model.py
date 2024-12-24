@@ -76,7 +76,7 @@ def make_discriminator_model():
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)
     x = layers.Flatten()(x)
-    x = layers.Dense(1 , activation='sigmoid')(x)
+    x = layers.Dense(1)(x)
 
     return tf.keras.Model(inputs=[input_image], outputs=x, name='global_discriminator')
 
@@ -224,26 +224,153 @@ def make_local_discriminator():
     x = layers.Conv2D(features * 8, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
     x = layers.Conv2D(features * 8, (5, 5), strides=(2, 2), padding='same',activation='leaky_relu')(x)
     x = layers.Flatten()(x)
-    x = layers.Dense(1, activation='sigmoid')(x)
+    x = layers.Dense(1)(x)
 
     model = tf.keras.Model(inputs=[input_image, mask], outputs=x, name="local_discriminator")
 
     return model
+#
+# class FeatureEmbedding(tf.keras.Model):
+#     def __init__(self):
+#         self.extractor = make_extractor_model()
+#         self.landmark_encoder = make_landmark_encoder()
+#         self.landmark_decoder = make_landmark_decoder()
+#         self.face_encoder = make_face_encoder()
+#         self.face_mask_decoder = make_face_mask_decoder()
+#         self.face_part_decoder = make_face_part_decoder()
+#
+#     def extractor_encode(self, img, training=False):
+#         return self.extractor([img], training=training)
+#
+#     def encode(self, encoder, input, training=False):
+#         return encoder(input, training=training)
+#
+#     def decode(self, decoder, input, training=False):
+#         return decoder(input, training=training)
+#
+#     def reparametrize(self, z_mean, z_log_var):
+#         eps = tf.random.normal(shape=z_mean.shape)
+#         return eps * tf.exp(z_log_var * .5) + z_mean
+#
+#     def reparametrize_landmark(self, img_incomplete, z, mask, training=False):
+#         l_mu, l_log_var  = self.encode(self.landmark_encoder, [img_incomplete, z, mask], training=training)
+#         return self.reparametrize(l_mu, l_log_var)
+#
+#     def reparametrize_face(self, img_incomplete, z, mask, training=False):
+#         f_mu, f_log_var  = self.encode(self.face_encoder, [img_incomplete, z, mask], training=training)
+#         return self.reparametrize(f_mu, f_log_var)
+#
+#     def infer_landmark_z(self, img_incomplete, z, mask):
+#         l_mu, l_log_var  = self.encode(self.landmark_encoder, [img_incomplete, z, mask], training=False)
+#         return self.reparametrize(l_mu, l_log_var)
+#
+#     def infer_face_z(self, img_incomplete, z, mask):
+#         f_mu, f_log_var  = self.encode(self.face_encoder, [img_incomplete, z, mask], training=False)
+#         return self.reparametrize(f_mu, f_log_var)
+#
+#     def decode_landmark(self, z, training=False):
+#         return self.decode(self.landmark_decoder, [ z ], training=training)
+#
+#     def decode_face_mask(self, z, training=False):
+#         return self.decode(self.face_mask_decoder, [ z ], training=training)
+#
+#     def decode_face_part(self, z, training=False):
+#         return self.decode(self.face_part_decoder, [ z ], training=training)
+#
+#     def call(self, inputs, training=False):
+#         img_complete, img_incomplete, mask = inputs
+#
+        
 
-class CyclicalAnnealingScheduler:
-    def __init__(self, cycle_length, max_beta=1.0, min_beta=0.0, n_cycles=4):
-        self.cycle_length = cycle_length
-        self.max_beta = max_beta
-        self.min_beta = min_beta
-        self.n_cycles = n_cycles
+
+class WGAN_GP():
+    def __init__(self):
+        self.generator = make_generator_model()
+        self.discriminator = make_discriminator_model()
+        self.local_discriminator = make_local_discriminator()
+        self.g_optimizer = tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
+        self.dglobal_optimizer = tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
+        self.dlocal_optimizer = tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
         
-    def get_beta(self, epoch):
-        """Calcula el valor beta para el epoch actual"""
-        # Determinar el ciclo actual
-        cycle = (epoch % self.cycle_length) / self.cycle_length
+    def gradient_penalty(self, real, fake):
+        # tf.print("gp", tf.shape(real))
+        # tf.print("gp ", tf.shape(fake))
+        alpha = tf.random.uniform([real.shape[0], 1, 1, 1], 0, 1)
+        diff = fake - real
+        interpolated = real + alpha * diff
+        with tf.GradientTape() as gp_tape:
+            gp_tape.watch(interpolated)
+            pred = self.discriminator([ interpolated ])
         
-        # Calcular el valor beta usando una función suave
-        beta = self.min_beta + (self.max_beta - self.min_beta) * \
-               (1 / (1 + np.exp(-12 * (cycle - 0.5))))
+        grads = gp_tape.gradient(pred, interpolated)
+        norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+        gp = tf.reduce_mean((norm - 1.)**2)
+        return gp
+
+    def gradient_penalty_local(self, real, fake, mask):
+        # tf.print("gp", tf.shape(real))
+        # tf.print("gp ", tf.shape(fake))
+        alpha = tf.random.uniform([real.shape[0], 1, 1, 1], 0, 1)
+        diff = fake - real
+        interpolated = real + alpha * diff
+        interpolated_masked = interpolated * mask
+        one_channel_mask = mask[:,:,:,0:1]
+        with tf.GradientTape() as gp_tape:
+            gp_tape.watch(interpolated_masked)
+            pred = self.local_discriminator([ interpolated_masked,  one_channel_mask ])
         
-        return tf.cast(beta, dtype=tf.float32)
+        grads = gp_tape.gradient(pred, interpolated_masked)
+        norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+        gp = tf.reduce_mean((norm - 1.)**2)
+        return gp
+        
+    @tf.function
+    def train_step(self, batch_original, batch_incomplete, masks, emb):
+        one_channel_mask = masks[:,:,:,0:1]
+        # Train Discriminator
+        for _ in range(5):
+            with tf.GradientTape() as disc_tape, \
+                tf.GradientTape() as local_disc_tape:
+                # Global discriminator
+                generated_images = self.generator([ emb, batch_incomplete, one_channel_mask ])
+                local_generated_images = generated_images * masks
+                batch_original_masked = batch_original * masks
+                
+                real_output = self.discriminator([ batch_original ])
+                fake_output = self.discriminator([ generated_images ])
+                
+                # tf.print(tf.shape(batch_original))
+                # tf.print(tf.shape(generated_images))
+                gp = self.gradient_penalty(batch_original, generated_images)
+                disc_loss = tf.reduce_mean(fake_output) - tf.reduce_mean(real_output) + 10.0 * gp
+                
+                local_real_output = self.local_discriminator([batch_original_masked, one_channel_mask])
+                local_fake_output = self.local_discriminator([local_generated_images, one_channel_mask])
+
+                lgp = self.gradient_penalty_local(batch_original_masked, local_generated_images, masks)
+                local_disc_loss = tf.reduce_mean(local_fake_output) - tf.reduce_mean(local_real_output) + 10.0 * lgp
+
+                # tf.print("global loss", disc_loss)
+                # tf.print("local loss", local_disc_loss)
+                
+            gradients = disc_tape.gradient(disc_loss, self.discriminator.trainable_variables)
+            self.dglobal_optimizer.apply_gradients(zip(gradients, self.discriminator.trainable_variables))
+
+            local_gradients = local_disc_tape.gradient(local_disc_loss, self.local_discriminator.trainable_variables)
+            self.dlocal_optimizer.apply_gradients(zip(local_gradients, self.local_discriminator.trainable_variables))
+            
+        # Train Generator
+        with tf.GradientTape() as gen_tape:
+            generated_images = self.generator([ emb, batch_incomplete, one_channel_mask ])
+            local_generated_images = generated_images * masks
+            fake_output = self.discriminator(generated_images)
+            local_fake_output = self.local_discriminator([local_generated_images, one_channel_mask])
+            gen_loss = -tf.reduce_mean(fake_output) - tf.reduce_mean(local_fake_output)
+            
+        # tf.print("gen loss", gen_loss)
+            
+        gradients = gen_tape.gradient(gen_loss, self.generator.trainable_variables)
+        self.g_optimizer.apply_gradients(zip(gradients, self.generator.trainable_variables))
+        
+        return gen_loss, disc_loss, local_disc_loss, generated_images
+

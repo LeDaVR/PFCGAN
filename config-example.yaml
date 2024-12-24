@@ -9,3 +9,4 @@ utils:
 train:
   log_interval: 20
   save_interval: 7000
+  out_save_interval: 50
