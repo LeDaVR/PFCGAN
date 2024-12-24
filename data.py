@@ -19,6 +19,7 @@ def load_image_dataset(image_paths, num_channels=3, binarize=False, threshold=0,
     dataset = tf.data.Dataset.from_tensor_slices(image_paths)
     dataset = dataset.map(load_and_preprocess)
     dataset = dataset.batch(batch_size)
+    dataset = dataset.filter(lambda x: tf.shape(x)[0] == batch_size)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
     return dataset
 
