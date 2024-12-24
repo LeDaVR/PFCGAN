@@ -35,7 +35,7 @@ EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000.
 w_face_mask = 4000.
-w_face_part = 6000.
+w_face_part = 8000.
 adversarial_loss = 20.
 latent_classifier_beta = 1.
 rec_loss = 40.
@@ -136,7 +136,7 @@ def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(7.)):
     white_loss = tf.reduce_sum(masked_cross_entropy_loss * masked_ytrue, axis=[1, 2, 3]) / total_white_pixels
     black_loss = tf.reduce_sum(masked_cross_entropy_loss * (1. - masked_ytrue), axis=[1, 2, 3]) / total_black_pixels
 
-    total_loss = white_loss * 0.4  + black_loss  * 0.6
+    total_loss = white_loss * 0.35  + black_loss  * 0.65
     return tf.reduce_mean(total_loss)
     total_img_error = tf.reduce_sum(masked_cross_entropy_loss, axis=[1,2,3])
     num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])
