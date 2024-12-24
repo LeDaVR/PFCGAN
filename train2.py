@@ -1,12 +1,13 @@
 ### Setup
 import tensorflow as tf
+import glob
 
 import matplotlib.pyplot as plt
 import os
 import time
 from datetime import datetime
 
-from data import MultiChannelDataLoader
+from data import MultiChannelDataLoader, load_image_dataset
 from model import make_extractor_model, make_generator_model, make_discriminator_model, \
     make_landmark_encoder, make_landmark_decoder, \
     make_face_encoder, make_face_mask_decoder, make_face_part_decoder, make_local_discriminator,\
@@ -45,10 +46,22 @@ consistency_loss = 100.
 landmark_factor = 1.
 mask_factor = 1.
 
+original_files = sorted(glob.glob(os.path.join(original_img_dir, "*.jpg")))
+#Instead of loading from directory just parse original files onto feature files
+landmarks_files = sorted(glob.glob(os.path.join(feature_img_dir, "*_landmarks.jpg")))
+face_mask_files = sorted(glob.glob(os.path.join(feature_img_dir, "*_mask.jpg")))
+face_part_files = sorted(glob.glob(os.path.join(feature_img_dir, "*_face_part.jpg")))
+
 # train_dataset = create_image_dataset(original_img_dir, feature_img_dir, batch_size=batch_size)
-data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128, 128))
-train_dataset = data_loader.create_dataset(batch_size=batch_size)
-print(train_dataset)
+# data_loader = MultiChannelDataLoader(original_img_dir, feature_img_dir, img_size=(128, 128))
+# train_dataset = data_loader.create_dataset(batch_size=batch_size)
+
+original_dataset = load_image_dataset(original_files, num_channels=3, binarize=False, batch_size=batch_size)
+landmarks_dataset = load_image_dataset(landmarks_files, num_channels=1, binarize=True, threshold=0, batch_size=batch_size)
+face_mask_dataset = load_image_dataset(face_mask_files, num_channels=1, binarize=True, threshold=0, batch_size=batch_size)
+face_part_dataset = load_image_dataset(face_part_files, num_channels=3, binarize=False, batch_size=batch_size)
+
+train_dataset = tf.data.Dataset.zip((original_dataset, landmarks_dataset, face_mask_dataset, face_part_dataset))
 
 class PFCGAN():
    def __init__(self, landmark_encoder, landmark_decoder, face_encoder, face_mask_decoder, face_part_decoder, generator, latent_classifier):
@@ -392,10 +405,12 @@ def train(dataset, epochs):
       if step % 100 == 0:
         batch_of_masks = mask_rgb(batch_size)
 
-      values = train_step(image_batch, batch_of_masks)
+      original, landmarks, face_mask, face_part = image_batch
+      one_tensor_batch = tf.concat([original, landmarks, face_mask, face_part], axis=-1)
 
-      z_emb = get_zemb(image_batch, batch_of_masks)
-      original = image_batch[:,:,:,0:3]
+      values = train_step(one_tensor_batch, batch_of_masks)
+
+      z_emb = get_zemb(one_tensor_batch, batch_of_masks)
       imcomplete = original * (1. - batch_of_masks)
       # Execute feature embedding for getting inputs for the generator
       # tf.print(tf.shape(original))

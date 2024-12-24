@@ -2,6 +2,26 @@ import tensorflow as tf
 import os
 import glob
 
+def load_image_dataset(image_paths, num_channels=3, binarize=False, threshold=0, batch_size=32):
+    img_height = 128
+    img_width = 128
+
+    def load_and_preprocess(path):
+        img = tf.io.read_file(path)
+        img = tf.image.decode_jpeg(img, channels=num_channels)
+        img = tf.image.resize(img, [img_height, img_width])
+        img = tf.divide(tf.cast(img, tf.float32), 127.5) - 1.
+        if binarize:
+            # Binarizar
+            img = tf.where(img > threshold, 1., -1.)
+        return img
+
+    dataset = tf.data.Dataset.from_tensor_slices(image_paths)
+    dataset = dataset.map(load_and_preprocess)
+    dataset = dataset.batch(batch_size)
+    dataset = dataset.prefetch(tf.data.AUTOTUNE)
+    return dataset
+
 class MultiChannelDataLoader:
     def __init__(self, original_dir, preprocessed_dir, img_size=(128, 128)):
         self.original_dir = original_dir
