@@ -6,7 +6,7 @@ import numpy as np
 ## Create the models
 
 def make_extractor_model():
-    input_image = layers.Input(shape=(128, 128, 3))
+    input_image = layers.Input(shape=(128, 128, 5))
     x = layers.Conv2D(32, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(input_image)    
     x = layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)    
     x = layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same', activation='leaky_relu')(x)    
@@ -33,7 +33,6 @@ def make_generator_model():
     y = layers.Dense(8*8*512)(input_latent)
     y = layers.Reshape((8, 8, 512))(y)
     # Concatenar la imagen de entrada si es necesario    
-    # ones_x = layers.Lambda(lambda x: tf.ones_like(x)[:, :, :, 0:1])(input_image)  # Fix the operation with Lambda layer
     # print("mask", tf.shape(mask), tf.shape(ones_x))
     x = layers.Concatenate(axis=-1, name="concat_mask")([input_image, mask])
     x = layers.Conv2D(32, (3, 3), strides=(1, 1), padding='same', activation='relu')(x)    

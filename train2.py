@@ -6,8 +6,6 @@ import os
 import time
 from datetime import datetime
 
-from IPython import display
-
 from data import MultiChannelDataLoader
 from model import make_extractor_model, make_generator_model, make_discriminator_model, \
     make_landmark_encoder, make_landmark_decoder, \
@@ -38,7 +36,7 @@ w_landmarks = 2000.
 w_face_mask = 4000.
 w_face_part = 4000.
 adversarial_loss = 20.
-latent_classifier_beta = 5.
+latent_classifier_beta = 1.
 rec_loss = 40.
 # f_kl = 0.2
 # kl_embedding = 0.5
@@ -97,16 +95,16 @@ def ce_loss_with_logits(x_logit, y_true, weight=tf.constant(7.)):
     )
     total_white_pixels = tf.reduce_sum(y_true, axis=[1, 2, 3])
     total_black_pixels = tf.reduce_sum(1. - y_true, axis=[1, 2, 3])
-    white_loss = tf.reduce_mean(cross_ent * y_true, axis=[1, 2, 3]) / total_white_pixels
-    black_loss = tf.reduce_mean(cross_ent * (1. - y_true), axis=[1, 2, 3]) / total_black_pixels
+    white_loss = tf.reduce_sum(cross_ent * y_true, axis=[1, 2, 3]) / total_white_pixels
+    black_loss = tf.reduce_sum(cross_ent * (1. - y_true), axis=[1, 2, 3]) / total_black_pixels
 
     total_loss = ( white_loss + black_loss ) / 2.
     return tf.reduce_mean(total_loss)
 
-def kl_divergence_loss(mean, logvar):
-    kl_loss = -0.5 * tf.reduce_sum(1 + logvar - tf.square(mean) - tf.exp(logvar), axis=1)
-    kl_loss = tf.reduce_mean(kl_loss)
-    return kl_loss
+# def kl_divergence_loss(mean, logvar):
+#     kl_loss = -0.5 * tf.reduce_sum(1 + logvar - tf.square(mean) - tf.exp(logvar), axis=1)
+#     kl_loss = tf.reduce_mean(kl_loss)
+#     return kl_loss
 
 def masked_loss(y_true, y_pred, mask):
    l1 = (tf.abs(y_true - y_pred))
@@ -122,8 +120,8 @@ def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(7.)):
     masked_ytrue = y_true * mask
     total_white_pixels = tf.reduce_sum(masked_ytrue, axis=[1, 2, 3])
     total_black_pixels = tf.reduce_sum(1. - masked_ytrue, axis=[1, 2, 3])
-    white_loss = tf.reduce_mean(masked_cross_entropy_loss * masked_ytrue, axis=[1, 2, 3]) / total_white_pixels
-    black_loss = tf.reduce_mean(masked_cross_entropy_loss * (1. - masked_ytrue), axis=[1, 2, 3]) / total_black_pixels
+    white_loss = tf.reduce_sum(masked_cross_entropy_loss * masked_ytrue, axis=[1, 2, 3]) / total_white_pixels
+    black_loss = tf.reduce_sum(masked_cross_entropy_loss * (1. - masked_ytrue), axis=[1, 2, 3]) / total_black_pixels
 
     total_loss = ( white_loss + black_loss ) / 2.
     return tf.reduce_mean(total_loss)
@@ -140,37 +138,41 @@ face_mask_decoder = make_face_mask_decoder()
 face_part_decoder = make_face_part_decoder()
 latent_classifier = LatentClassifier(latent_dim=256)
 latent_classifier512 = LatentClassifier(latent_dim=512)
+latent_classifier_face = LatentClassifier(latent_dim=256)
 wpgan = WGAN_GP()
 pfcGan = PFCGAN(landmark_encoder, landmark_decoder, face_encoder, face_mask_decoder, face_part_decoder, wpgan.generator, latent_classifier)
 
 face_embedding_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 latent_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
+latent_face_discriminator_optimizer = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 latent_discriminator_optimizer512 = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 
 ### Save checkpoints
 checkpoint_dir = './training_checkpoints'
 checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(
+                                
                                 # generator_optimizer=generator_optimizer,
                                 #  extractor_optimizer=extractor_optimizer,
-                                 global_discriminator_optimizer=wpgan.dglobal_optimizer,
-                                 local_discriminator_optimizer=wpgan.dlocal_optimizer,
-                                 generator_optimizer=wpgan.g_optimizer,
-                                 generator=wpgan.generator,
-                                 discriminator=wpgan.discriminator,
-                                 local_discriminator=wpgan.local_discriminator,
-                                 face_embedding_optimizer=face_embedding_optimizer,
-                                 latent_discriminator_optimizer=latent_discriminator_optimizer,
-                                 latent_discriminator_optimizer512=latent_discriminator_optimizer512,
-                                 latent_classifier=latent_classifier,
-                                 latent_classifier512=latent_classifier512,
-                                 extractor=extractor,
-                                 landmark_encoder=landmark_encoder,
-                                 landmark_decoder=landmark_decoder,
-                                 face_encoder=face_encoder,
-                                 face_mask_decoder=face_mask_decoder,
-                                 face_part_decoder=face_part_decoder,
-                                 )
+                                global_discriminator_optimizer=wpgan.dglobal_optimizer,
+                                local_discriminator_optimizer=wpgan.dlocal_optimizer,
+                                generator_optimizer=wpgan.g_optimizer,
+                                generator=wpgan.generator,
+                                discriminator=wpgan.discriminator,
+                                local_discriminator=wpgan.local_discriminator,
+                                face_embedding_optimizer=face_embedding_optimizer,
+                                latent_discriminator_optimizer=latent_discriminator_optimizer,
+                                latent_face_discriminator_optimizer=latent_face_discriminator_optimizer,
+                                latent_discriminator_optimizer512=latent_discriminator_optimizer512,
+                                latent_classifier=latent_classifier,
+                                latent_classifier512=latent_classifier512,
+                                extractor=extractor,
+                                landmark_encoder=landmark_encoder,
+                                landmark_decoder=landmark_decoder,
+                                face_encoder=face_encoder,
+                                face_mask_decoder=face_mask_decoder,
+                                face_part_decoder=face_part_decoder,
+)
 
 ## Define the training loop
 def feature_embedding(x, z_extractor, mask, training=True):
@@ -235,7 +237,7 @@ def train_step(batch, lbatch_mask):
 
       #Skip the regression loss for the momment
 
-      zer_mu, zer_log_var = extractor([ tbatch_original ], training=True)
+      zer_mu, zer_log_var = extractor([batch[:,:,:,3:8]], training=True)
       zer_sample = reparametrize(zer_mu, zer_log_var)
 
       (zerl_mu, zerl_log_var), (zerf_mu, zerf_log_var), (zerl_sample, zerf_sample) , zer_emb, zer_landmarks, zer_mask, zer_part = feature_embedding(tbatch_original_incomplete, zer_sample, one_channel_mask, training=True)
@@ -256,7 +258,7 @@ def train_step(batch, lbatch_mask):
       emb_out = latent_classifier512(zer_emb)
       class256_out_real = latent_classifier(samples)
       zerl_out = latent_classifier(zerl_sample)
-      zerf_out = latent_classifier(zerf_sample)
+      zerf_out = latent_classifier_face(zerf_sample)
 
       # Generate normal dsitribution samples
       # use latent discriminator instead of kl loss
@@ -306,7 +308,8 @@ def train_step(batch, lbatch_mask):
 
     classfifiers_trainable_variables = (
       latent_classifier.trainable_variables + 
-      latent_classifier512.trainable_variables
+      latent_classifier512.trainable_variables +
+      latent_classifier_face.trainable_variables
     )
 
     gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
@@ -371,9 +374,10 @@ def train_step(batch, lbatch_mask):
 
 def get_zemb(image_batch, batch_of_masks):
   original_images = image_batch[:,:,:,0:3]
+  original_features = image_batch[:,:,:,3:8]
   batch_incomplete = original_images * (1. - batch_of_masks)
   one_channel_mask = batch_of_masks[:,:,:,0:1]
-  zer_mu, zer_log_var = extractor([ original_images ], training=False)
+  zer_mu, zer_log_var = extractor([ original_features ], training=False)
   zer_sample = reparametrize(zer_mu, zer_log_var)
   _, _, _ , zer_emb, _, _, _ = feature_embedding(batch_incomplete, zer_sample, one_channel_mask, training=False)
   return zer_emb
@@ -397,7 +401,7 @@ def train(dataset, epochs):
       # tf.print(tf.shape(original))
       # tf.print(tf.shape(imcomplete))
       # tf.print(tf.shape(batch_of_masks))
-      gdloss, ldloss, genloss ,generated_images = wpgan.train_step(original, imcomplete, batch_of_masks, z_emb)
+      # gdloss, ldloss, genloss ,generated_images = wpgan.train_step(original, imcomplete, batch_of_masks, z_emb)
 
       total_steps += 1
       if total_steps % config["train"]["log_interval"] == 0:
@@ -407,9 +411,9 @@ def train(dataset, epochs):
         with writer.as_default():
           for name, value in values["losses"].items():
             tf.summary.scalar(name, value, step=total_steps)
-          tf.summary.scalar("generator/global_loss", gdloss, step=total_steps)
-          tf.summary.scalar("generator/local_loss", ldloss, step=total_steps)
-          tf.summary.scalar("generator/gen_loss", genloss, step=total_steps)
+          # tf.summary.scalar("generator/global_loss", gdloss, step=total_steps)
+          # tf.summary.scalar("generator/local_loss", ldloss, step=total_steps)
+          # tf.summary.scalar("generator/gen_loss", genloss, step=total_steps)
 
       if total_steps % config["train"]["save_interval"] == 0:
         tf.print("losses", values["losses"])	
@@ -417,7 +421,8 @@ def train(dataset, epochs):
       if total_steps % out_train_interval == 0 and config["utils"]["show_embedding"]:
           outputs = values["outputs"]
           original_image = outputs["original_images"][0]
-          reconstructed_image = generated_images[0]
+          reconstructed_image = tf.zeros_like(original_image)
+          # reconstructed_image = generated_images[0]
           landmark_sample = outputs["landmark_reconstructed"][0]
           mask_sample = outputs["face_mask_reconstructed"][0]
           face_part_sample = outputs["face_part_reconstructed"][0]

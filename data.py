@@ -8,13 +8,17 @@ class MultiChannelDataLoader:
         self.preprocessed_dir = preprocessed_dir
         self.img_size = img_size
         
-    def load_and_preprocess_image(self, image_path, num_channels=3):
+    def load_and_preprocess_image(self, image_path, num_channels=3, binarize=False, threshold=0):
         # Leer la imagen
         img = tf.io.read_file(image_path)
         # Decodificar la imagen
         img = tf.image.decode_png(img, channels=num_channels)
         # Convertir a float32 y normalizar
         img = tf.divide(tf.cast(img, tf.float32), 127.5) - 1.
+
+        if binarize:
+            # Binarizar
+            img = tf.where(img > threshold, 1., -1.)
         # Redimensionar
         img = tf.image.resize(img, self.img_size)
         return img
@@ -41,8 +45,8 @@ class MultiChannelDataLoader:
         
         def load_image_tuple(orig_path, landmarks_path, face_mask_path, face_part_path):
             orig_img = self.load_and_preprocess_image(orig_path, num_channels=3)
-            landmark_img = self.load_and_preprocess_image(landmarks_path, num_channels=1)
-            face_mask_img = self.load_and_preprocess_image(face_mask_path, num_channels=1)
+            landmark_img = self.load_and_preprocess_image(landmarks_path, num_channels=1, binarize=True)
+            face_mask_img = self.load_and_preprocess_image(face_mask_path, num_channels=1, binarize=True)
             face_part_img = self.load_and_preprocess_image(face_part_path, num_channels=3)
 
             combined = tf.concat([orig_img, landmark_img, face_mask_img, face_part_img], axis=-1)
