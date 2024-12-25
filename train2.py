@@ -428,9 +428,10 @@ def train(dataset, epochs):
             for name, value in values["losses"].items():
               tf.summary.scalar(name, value, step=total_steps)
         if config["train"]["mode"] == "generator":
-          tf.summary.scalar("generator/global_loss", gdloss, step=total_steps)
-          tf.summary.scalar("generator/local_loss", ldloss, step=total_steps)
-          tf.summary.scalar("generator/gen_loss", genloss, step=total_steps)
+          with writer.as_default():
+            tf.summary.scalar("generator/global_loss", gdloss, step=total_steps)
+            tf.summary.scalar("generator/local_loss", ldloss, step=total_steps)
+            tf.summary.scalar("generator/gen_loss", genloss, step=total_steps)
 
       if total_steps % config["train"]["save_interval"] == 0:
         # tf.print("losses", values["losses"])	
