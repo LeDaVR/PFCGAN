@@ -37,7 +37,7 @@ w_landmarks = 2000.
 w_face_mask = 3000.
 w_face_part = 8000.
 adversarial_loss = 20.
-latent_classifier_beta = 1.
+latent_classifier_beta = 2.
 rec_loss = 40.
 # f_kl = 0.2
 # kl_embedding = 0.5
@@ -164,21 +164,22 @@ latent_discriminator_optimizer512 = tf.keras.optimizers.Adam(2e-4, beta_1=0.5)
 checkpoint_dir = './training_checkpoints'
 checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 checkpoint = tf.train.Checkpoint(
-                                
-                                # generator_optimizer=generator_optimizer,
-                                #  extractor_optimizer=extractor_optimizer,
+                                # WGAN 
                                 global_discriminator_optimizer=wpgan.dglobal_optimizer,
                                 local_discriminator_optimizer=wpgan.dlocal_optimizer,
                                 generator_optimizer=wpgan.g_optimizer,
                                 generator=wpgan.generator,
                                 discriminator=wpgan.discriminator,
                                 local_discriminator=wpgan.local_discriminator,
-                                face_embedding_optimizer=face_embedding_optimizer,
+                                # Latent discriminator
                                 latent_discriminator_optimizer=latent_discriminator_optimizer,
                                 latent_face_discriminator_optimizer=latent_face_discriminator_optimizer,
                                 latent_discriminator_optimizer512=latent_discriminator_optimizer512,
                                 latent_classifier=latent_classifier,
                                 latent_classifier512=latent_classifier512,
+                                latent_classifier_face=latent_classifier_face,
+                                # Face embedding
+                                face_embedding_optimizer=face_embedding_optimizer,
                                 extractor=extractor,
                                 landmark_encoder=landmark_encoder,
                                 landmark_decoder=landmark_decoder,
@@ -216,7 +217,9 @@ writer = tf.summary.create_file_writer(log_dir)
 @tf.function
 def train_step(batch, lbatch_mask):
     with  tf.GradientTape() as embedding_tape, \
-      tf.GradientTape() as latent_discriminator_tape:
+      tf.GradientTape() as latent_discriminator_tape, \
+      tf.GradientTape() as latent_face_discriminator_tape, \
+      tf.GradientTape() as latent_keypoint_discriminator_tape:
       # Prepare the batch
       batch_size = tf.shape(batch)[0]
       # lbatch_mask = mask_rgb(batch_size)
@@ -279,6 +282,13 @@ def train_step(batch, lbatch_mask):
       l_l_loss = latent_discriminator_loss(class256_out_real , zerl_out)
       l_f_loss = latent_discriminator_loss(class256_out_real , zerf_out)
       emb_lc_loss = latent_discriminator_loss(clas512_out_real , emb_out)
+      
+      l512_loss = e_lc_loss + emb_lc_loss 
+      lface_loss = l_f_loss 
+      lkeypoint_loss = l_l_loss 
+      # with writer.as_default():
+      #   tf.summary.scalar("discriminator/512real_loss", class256_out_real, step=step)
+      #   tf.summary.scalar("discriminator/lface_loss", class256_out_real, step=step)
 
       classifier_loss = (l_l_loss + l_f_loss + emb_lc_loss + e_lc_loss)
       
@@ -319,27 +329,18 @@ def train_step(batch, lbatch_mask):
       landmark_decoder.trainable_variables
     )
 
-    classfifiers_trainable_variables = (
-      latent_classifier.trainable_variables + 
-      latent_classifier512.trainable_variables +
-      latent_classifier_face.trainable_variables
-    )
-
     gradients_of_embedding = embedding_tape.gradient(total_embedding_loss, face_embedding_trainable_variables)
     # clipped_gradients = [tf.clip_by_norm(g, 1.0) for g in gradients_of_embedding]
     face_embedding_optimizer.apply_gradients(zip(gradients_of_embedding, face_embedding_trainable_variables))
 
-    # gradients_of_global_discriminator = global_disc_tape.gradient(global_discriminator_loss, discriminator.trainable_variables)
-    # global_discriminator_optimizer.apply_gradients(zip(gradients_of_global_discriminator, discriminator.trainable_variables))
-    #
-    # gradients_of_local_discriminator = local_discriminator_tape.gradient(local_discriminator_loss, local_discriminator.trainable_variables)
-    # local_discriminator_optimizer.apply_gradients(zip(gradients_of_local_discriminator, local_discriminator.trainable_variables))
+    gradients_of_latent_discriminator = latent_discriminator_tape.gradient(l512_loss, latent_classifier512.trainable_variables)
+    latent_discriminator_optimizer512.apply_gradients(zip(gradients_of_latent_discriminator, latent_classifier512.trainable_variables))
 
-    gradients_of_latent_discriminator = latent_discriminator_tape.gradient(classifier_loss, classfifiers_trainable_variables)
-    latent_discriminator_optimizer.apply_gradients(zip(gradients_of_latent_discriminator, classfifiers_trainable_variables))
+    gradients_of_latent_face_discriminator = latent_face_discriminator_tape.gradient(lface_loss, latent_classifier_face.trainable_variables)
+    latent_face_discriminator_optimizer.apply_gradients(zip(gradients_of_latent_face_discriminator, latent_classifier_face.trainable_variables))
 
-    # gradients_of_generator = generator_tape.gradient(total_generator_loss, generator.trainable_variables)
-    # generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
+    gradients_of_latent_keypoint_discriminator = latent_keypoint_discriminator_tape.gradient(lkeypoint_loss, latent_classifier.trainable_variables)
+    latent_discriminator_optimizer.apply_gradients(zip(gradients_of_latent_keypoint_discriminator, latent_classifier.trainable_variables))
 
     return {
       "outputs": {
@@ -408,32 +409,69 @@ def train(dataset, epochs):
       original, landmarks, face_mask, face_part = image_batch
       one_tensor_batch = tf.concat([original, landmarks, face_mask, face_part], axis=-1)
 
-      values = train_step(one_tensor_batch, batch_of_masks)
+      if config["train"]["mode"] == "embedding":
+        values = train_step(one_tensor_batch, batch_of_masks)
 
-      z_emb = get_zemb(one_tensor_batch, batch_of_masks)
-      imcomplete = original * (1. - batch_of_masks)
-      # Execute feature embedding for getting inputs for the generator
-      # tf.print(tf.shape(original))
-      # tf.print(tf.shape(imcomplete))
-      # tf.print(tf.shape(batch_of_masks))
-      # gdloss, ldloss, genloss ,generated_images = wpgan.train_step(original, imcomplete, batch_of_masks, z_emb)
+      if config["train"]["mode"] == "generator":
+        z_emb = get_zemb(one_tensor_batch, batch_of_masks)
+        imcomplete = original * (1. - batch_of_masks)
+        # Execute feature embedding for getting inputs for the generator
+        gdloss, ldloss, genloss ,generated_images = wpgan.train_step(original, imcomplete, batch_of_masks, z_emb)
 
       total_steps += 1
       if total_steps % config["train"]["log_interval"] == 0:
         tf.print("epoch %d step %d" % (epoch + 1, step + 1))
 
       if total_steps % config["train"]["log_interval"] == 0:
-        with writer.as_default():
-          for name, value in values["losses"].items():
-            tf.summary.scalar(name, value, step=total_steps)
-          # tf.summary.scalar("generator/global_loss", gdloss, step=total_steps)
-          # tf.summary.scalar("generator/local_loss", ldloss, step=total_steps)
-          # tf.summary.scalar("generator/gen_loss", genloss, step=total_steps)
+        if config["train"]["mode"] == "embedding":
+          with writer.as_default():
+            for name, value in values["losses"].items():
+              tf.summary.scalar(name, value, step=total_steps)
+        if config["train"]["mode"] == "generator":
+          tf.summary.scalar("generator/global_loss", gdloss, step=total_steps)
+          tf.summary.scalar("generator/local_loss", ldloss, step=total_steps)
+          tf.summary.scalar("generator/gen_loss", genloss, step=total_steps)
 
       if total_steps % config["train"]["save_interval"] == 0:
-        tf.print("losses", values["losses"])	
+        # tf.print("losses", values["losses"])	
+        tf.print("Saving model...")
         checkpoint.save(file_prefix = checkpoint_prefix)
-      if total_steps % out_train_interval == 0 and config["utils"]["show_embedding"]:
+        if config["train"]["mode"] == "generator":
+          tf.print("global d", gdloss)
+          tf.print("local d", ldloss)
+          tf.print("gen d", genloss)
+        if config["train"]["mode"] == "embedding":
+          tf.print("Losses", values["losses"])
+
+      if total_steps % out_train_interval == 0 and config["train"]["mode"] == "generator":
+        generated_image = generated_images[0]
+
+        # shift from -1 to 1
+        original_image = (original[0] + 1.) / 2.
+        generated_image = (generated_image + 1.) / 2.
+
+        #Mask original
+        original_image *= (1. - batch_of_masks[0])
+
+        # Plot vs for landmarks, masks and parts
+
+        # Crear el gráfico con varias subgráficas
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 12))
+        titles = [
+            "Original Image", "Reconstructed Image", "Landmark Sample", "Mask Sample",
+            "Face Part Sample"
+        ]
+        axes[0].imshow(original_image)
+        axes[0].set_title(titles[0])
+        axes[1].imshow(generated_image)
+        axes[1].set_title(titles[1])
+        plt.tight_layout()
+        plt.savefig('res/generator_at_step_{:04d}.png'.format(total_steps))
+        plt.close()
+
+
+      if total_steps % out_train_interval == 0 and config["utils"]["show_embedding"] and config["train"]["mode"] == "embedding":
           outputs = values["outputs"]
           original_image = outputs["original_images"][0]
           reconstructed_image = tf.zeros_like(original_image)
