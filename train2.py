@@ -34,7 +34,7 @@ out_train_interval = config["train"]["out_save_interval"]
 EPOCHS = config["hyper_parameters"]["epochs"]
 batch_size = config["hyper_parameters"]["batch_size"]
 w_landmarks = 2000.
-w_face_mask = 4000.
+w_face_mask = 3000.
 w_face_part = 8000.
 adversarial_loss = 20.
 latent_classifier_beta = 1.
@@ -43,8 +43,8 @@ rec_loss = 40.
 # kl_embedding = 0.5
 # e_kl = 1.
 consistency_loss = 100.
-landmark_factor = 1.
-mask_factor = 1.
+landmark_factor = .3
+mask_factor = .3
 
 original_files = sorted(glob.glob(os.path.join(original_img_dir, "*.jpg")))
 #Instead of loading from directory just parse original files onto feature files
@@ -100,7 +100,7 @@ def l1_reconstruction_loss(x, y_true):
   l1 = tf.reduce_mean(tf.abs(y_true - x), axis = [1,2,3])
   return tf.reduce_mean(l1)
 
-def ce_loss_with_logits(x_logit, y_true, weight=tf.constant(7.)):
+def ce_loss_with_logits(x_logit, y_true, weight=tf.constant(.5)):
     cross_ent = tf.nn.weighted_cross_entropy_with_logits(
         logits=x_logit, 
         labels=y_true, 
@@ -111,7 +111,7 @@ def ce_loss_with_logits(x_logit, y_true, weight=tf.constant(7.)):
     white_loss = tf.reduce_sum(cross_ent * y_true, axis=[1, 2, 3]) / total_white_pixels
     black_loss = tf.reduce_sum(cross_ent * (1. - y_true), axis=[1, 2, 3]) / total_black_pixels
 
-    total_loss = white_loss * 0.4  + black_loss  * 0.6
+    total_loss = white_loss * weight  + black_loss  * (1. - weight)
     return tf.reduce_mean(total_loss)
 
 # def kl_divergence_loss(mean, logvar):
@@ -127,7 +127,7 @@ def masked_loss(y_true, y_pred, mask):
    normalized_img_error = total_img_error / (num_pixels_per_image + 1e-8)
    return tf.reduce_mean(normalized_img_error)
 
-def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(7.)):
+def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(.5)):
     cross_entropy_loss = tf.nn.weighted_cross_entropy_with_logits(logits=x_logits, labels=y_true, pos_weight=weight)
     masked_cross_entropy_loss = cross_entropy_loss * mask
     masked_ytrue = y_true * mask
@@ -136,7 +136,7 @@ def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(7.)):
     white_loss = tf.reduce_sum(masked_cross_entropy_loss * masked_ytrue, axis=[1, 2, 3]) / total_white_pixels
     black_loss = tf.reduce_sum(masked_cross_entropy_loss * (1. - masked_ytrue), axis=[1, 2, 3]) / total_black_pixels
 
-    total_loss = white_loss * 0.35  + black_loss  * 0.65
+    total_loss = white_loss * weight  + black_loss  * (1. - weight)
     return tf.reduce_mean(total_loss)
     total_img_error = tf.reduce_sum(masked_cross_entropy_loss, axis=[1,2,3])
     num_pixels_per_image = tf.reduce_sum(mask, axis=[1, 2, 3])

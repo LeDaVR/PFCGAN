@@ -282,7 +282,9 @@ def process_mediapipe_image(img, output_folder):
     image = mp.Image.create_from_file(img)
 
     img_cropped = crop(image.numpy_view())
-    # img = np.resize(img_cropped, (128, 128))
+    img_resized = cv2.resize(img_cropped, (128, 128))
+
+    image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_resized)
 
     # STEP 4: Detect face landmarks from the input image.
     detection_result = detector.detect(image)
@@ -291,7 +293,8 @@ def process_mediapipe_image(img, output_folder):
         return img, False
 
     # STEP 5: Process the detection result. In this case, visualize it.
-    annotated_image, tesselation= draw_landmarks_on_image(image.numpy_view(), detection_result)
+    annotated_image, tesselation= draw_landmarks_on_image(img_resized, detection_result)
+
 
     # cv2_imshow(cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR))
     # # Máscara y extracción de la parte de la cara
@@ -314,14 +317,15 @@ def process_mediapipe_image(img, output_folder):
     mask_expanded =mask_expanded.astype(np.float32) / 255.0 
     face_part = np.clip(image.numpy_view() * mask_expanded, 0, 255).astype(np.uint8)
 
-    annotated_image = crop(annotated_image)
-    tesselation = crop(tesselation)
-    face_part = crop(face_part)
-    mask_img = crop(mask_img)
+    # annotated_image = crop(annotated_image)
+    # tesselation = crop(tesselation)
+    # face_part = crop(face_part)
+    # mask_img = crop(mask_img)
 
     # Guardar las imágenes procesadas
+
     name = img.split('\\')[-1].split(".")[0]
-    cv2.imwrite(os.path.join(output_folder, "original", f"{name}.jpg"), cv2.cvtColor(img_cropped, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(os.path.join(output_folder, "original", f"{name}.jpg"), cv2.cvtColor(img_resized, cv2.COLOR_RGB2BGR))
     cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_landmarks.jpg"), cv2.cvtColor(annotated_image, cv2.COLOR_RGB2GRAY))
     cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_mask.jpg"), tesselation)
     cv2.imwrite(os.path.join(output_folder, "processed", f"{name}_face_part.jpg"), cv2.cvtColor(face_part, cv2.COLOR_RGB2BGR))
