@@ -319,7 +319,7 @@ class WGAN_GP():
             pred = self.local_discriminator([ interpolated_masked,  one_channel_mask ])
         
         grads = gp_tape.gradient(pred, interpolated_masked)
-        norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+        norm = tf.sqrt(tf.reduce_sum(tf.square(grads) * mask, axis=[1, 2, 3]))
         gp = tf.reduce_mean((norm - 1.)**2)
         return gp
         

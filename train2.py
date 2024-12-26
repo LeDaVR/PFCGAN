@@ -37,7 +37,7 @@ w_landmarks = 2000.
 w_face_mask = 3000.
 w_face_part = 8000.
 adversarial_loss = 20.
-latent_classifier_beta = 2.
+latent_classifier_beta = 1.
 rec_loss = 40.
 # f_kl = 0.2
 # kl_embedding = 0.5
@@ -101,10 +101,9 @@ def l1_reconstruction_loss(x, y_true):
   return tf.reduce_mean(l1)
 
 def ce_loss_with_logits(x_logit, y_true, weight=tf.constant(.5)):
-    cross_ent = tf.nn.weighted_cross_entropy_with_logits(
+    cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(
         logits=x_logit, 
         labels=y_true, 
-        pos_weight=weight
     )
     total_white_pixels = tf.reduce_sum(y_true, axis=[1, 2, 3])
     total_black_pixels = tf.reduce_sum(1. - y_true, axis=[1, 2, 3])
@@ -128,7 +127,7 @@ def masked_loss(y_true, y_pred, mask):
    return tf.reduce_mean(normalized_img_error)
 
 def masked_ce_loss_with_logits(x_logits, y_true, mask, weight=tf.constant(.5)):
-    cross_entropy_loss = tf.nn.weighted_cross_entropy_with_logits(logits=x_logits, labels=y_true, pos_weight=weight)
+    cross_entropy_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logits, labels=y_true)
     masked_cross_entropy_loss = cross_entropy_loss * mask
     masked_ytrue = y_true * mask
     total_white_pixels = tf.reduce_sum(masked_ytrue, axis=[1, 2, 3])
