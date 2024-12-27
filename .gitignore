@@ -1,3 +1,14 @@
 /model_logs/*
 /neuralgym_logs/*
-/preprocess/out/*
+/preprocessing/out/*
+/preprocessing/checkpoint.txt
+/preprocessing/not_detected.txt
+/preprocessing/celeba_processed.flist
+/training_checkpoints/*
+/.ipynb_checkpoints/*
+__pycache__/*
+/res/*
+/old/*
+/logs/*
+config.yaml
+/data/*

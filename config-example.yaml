@@ -1,0 +1,13 @@
+paths:
+  original_img_dir: "path/to/original/images"
+  feature_img_dir: "path/to/processed/images"
+hyper_parameters:
+  batch_size: 12
+  epochs: 80
+utils:
+  show_embedding: False
+train:
+  log_interval: 20
+  save_interval: 7000
+  out_save_interval: 50
+  mode: "embedding"
