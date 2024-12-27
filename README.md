@@ -1,5 +1,9 @@
 # PFCGAN
 
+##
+WORK IN PROGRESS
+##
+
 ## Preprocessing
 
 execute `python preprocess.py` to preprocess the dataset.
@@ -26,8 +30,6 @@ python flist.py --folder 'path/to/original/images' --out celeba_og_train.flist
 python flist.py --folder 'path/to/processed/images' --out celeba_processed.flist 
 ```
 
-Update your settings.yml file with the paths to the original and processed images.
-
 # Running the model
 
 ## Create a environment with conda
@@ -42,4 +44,4 @@ conda activate pfcgan
 ```
 conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
 python -m pip install "tensorflow<2.11" matplotlib numpy==1.26.4 ipython
-```
+```\
